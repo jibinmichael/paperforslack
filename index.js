@@ -679,6 +679,101 @@ app.error((error) => {
     httpApp.get('/health', (req, res) => {
       res.json({ status: 'ok', timestamp: Date.now() });
     });
+
+    // OAuth redirect handler for public installations
+    httpApp.get('/slack/oauth/callback', (req, res) => {
+      const { code, error } = req.query;
+      
+      if (error) {
+        console.error('OAuth error:', error);
+        res.send(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Paper Installation Failed</title>
+              <style>
+                body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f8f9fa; }
+                .container { max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+                .error { color: #e74c3c; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <h2 class="error">❌ Installation Failed</h2>
+                <p>Sorry, there was an error installing Paper to your Slack workspace.</p>
+                <p><strong>Error:</strong> ${error}</p>
+                <a href="/">Try Again</a>
+              </div>
+            </body>
+          </html>
+        `);
+        return;
+      }
+
+      if (code) {
+        console.log('✅ Paper installed successfully! OAuth code:', code);
+        res.send(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Paper Installed Successfully!</title>
+              <style>
+                body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f8f9fa; }
+                .container { max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+                .success { color: #27ae60; }
+                .btn { display: inline-block; background: #4CAF50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin-top: 20px; }
+                .feature { margin: 10px 0; text-align: left; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <h2 class="success">🎉 Paper Installed Successfully!</h2>
+                <p>Your AI conversation summarizer is ready to use!</p>
+                
+                <div style="margin: 30px 0;">
+                  <h3>📄 What Paper Does:</h3>
+                  <div class="feature">✅ Creates AI-powered Canvas summaries</div>
+                  <div class="feature">✅ Extracts action items with checkboxes</div>
+                  <div class="feature">✅ Groups links and dates automatically</div>
+                  <div class="feature">✅ Updates every 10 minutes or 10 messages</div>
+                  <div class="feature">✅ One canvas per channel - always updated</div>
+                </div>
+
+                <div style="margin: 30px 0;">
+                  <h3>🚀 How to Use:</h3>
+                  <div class="feature">1. Add @Paper to any channel</div>
+                  <div class="feature">2. Have a conversation (5+ messages)</div>
+                  <div class="feature">3. Watch Paper create beautiful Canvas summaries!</div>
+                  <div class="feature">4. Type <code>@Paper summary</code> for manual updates</div>
+                </div>
+
+                <a href="slack://app" class="btn">Open Slack</a>
+              </div>
+            </body>
+          </html>
+        `);
+      } else {
+        res.send(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Paper Installation</title>
+              <style>
+                body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f8f9fa; }
+                .container { max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <h2>📄 Paper Installation</h2>
+                <p>Something went wrong. Please try installing again.</p>
+                <a href="/">Return to Home</a>
+              </div>
+            </body>
+          </html>
+        `);
+      }
+    });
     
     // Start HTTP server on the required port
     httpApp.listen(port, '0.0.0.0', () => {
