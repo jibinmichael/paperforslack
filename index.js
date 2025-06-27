@@ -140,8 +140,8 @@ async function generateSummary(messages) {
 // Create or update summary (Canvas if available, message if not)
 async function updateCanvas(channelId, summary) {
   try {
-    // Try Canvas API first
-    if (app.client.canvases) {
+    // Force message fallback for now (Canvas API not available in current SDK)
+    if (false && app.client.canvases) {
       let canvasId = canvasData.get(channelId);
       
       if (!canvasId) {
