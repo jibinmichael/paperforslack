@@ -58,9 +58,9 @@ You are creating a conversation summary in Granola-style format, optimized for S
 - Include decision owners when mentioned
 
 ## 🎯 **Action Items & Next Steps**
-- **@Person**: Specific task or responsibility
-- **Timeline**: Any deadlines or timeframes mentioned
-- **Follow-up**: Required next steps or meetings
+- [ ] **@Person**: Specific task or responsibility with checkbox for tracking
+- [ ] **Timeline**: Any deadlines or timeframes mentioned with checkbox
+- [ ] **Follow-up**: Required next steps or meetings with interactive checkbox
 
 ## 📌 **Key Insights & Resources**
 - Important quotes or insights
@@ -124,19 +124,49 @@ function shouldProcessBatch(channelId) {
   ) && !data.pendingUpdate;
 }
 
-// Generate AI summary
+// Get user display names for better participant formatting
+async function getUserDisplayNames(userIds) {
+  const userNames = {};
+  
+  for (const userId of [...new Set(userIds)]) {
+    try {
+      const userInfo = await app.client.users.info({ user: userId });
+      userNames[userId] = userInfo.user.real_name || userInfo.user.display_name || userInfo.user.name;
+    } catch (error) {
+      console.error(`Error fetching user info for ${userId}:`, error);
+      userNames[userId] = userId; // Fallback to user ID
+    }
+  }
+  
+  return userNames;
+}
+
+// Generate AI summary with enhanced formatting
 async function generateSummary(messages) {
   try {
+    // Get user display names
+    const userIds = messages.map(msg => msg.user);
+    const userNames = await getUserDisplayNames(userIds);
+    
+    // Create conversation text with real names
     const conversationText = messages.map(msg => 
-      `${msg.user}: ${msg.text}`
+      `${userNames[msg.user] || msg.user}: ${msg.text}`
     ).join('\n');
+
+    const enhancedPrompt = GRANOLA_PROMPT + `
+
+**IMPORTANT FORMATTING INSTRUCTIONS:**
+- For action items, use interactive checkboxes: "- [ ] Task description"
+- Use real participant names when available: ${Object.entries(userNames).map(([id, name]) => `${id} = ${name}`).join(', ')}
+- Make action items specific and actionable
+- Include @mentions for people when assigning tasks: @${Object.values(userNames).join(', @')}`;
 
     const response = await openai.chat.completions.create({
       model: "gpt-4",
       messages: [
         {
           role: "system",
-          content: GRANOLA_PROMPT
+          content: enhancedPrompt
         },
         {
           role: "user",
@@ -201,29 +231,35 @@ async function updateCanvas(channelId, summary) {
       
       console.log(`✅ Channel Canvas created successfully: ${canvasId}`);
       
-      // Notify channel about new canvas with beautiful message
+      // Get workspace info for Canvas link
+      const teamInfo = await app.client.team.info();
+      const workspaceUrl = `https://${teamInfo.team.domain}.slack.com`;
+      const canvasUrl = `${workspaceUrl}/docs/${teamInfo.team.id}/${canvasId}`;
+      
+      // Notify channel with Canvas link and preview
       await app.client.chat.postMessage({
         channel: channelId,
-        text: "🎨 *Paper* Canvas Created!",
+        text: `📄 *Paper has created your conversation summary Canvas!*\n\n🔗 View Canvas: ${canvasUrl}`,
         blocks: [
           {
             type: "section",
             text: {
               type: "mrkdwn",
-              text: "🎨 *Paper has created your conversation summary Canvas!*\n\n✨ Check the Canvas tab above to see your beautiful, auto-updating summary."
+              text: `📄 *Paper has created your conversation summary Canvas!*\n\n🔗 <${canvasUrl}|📄 Open Conversation Summary Canvas>`
             }
           },
           {
-            type: "divider"
-          },
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: "🔄 *Auto-Updates:* Every 10 messages or 2 minutes\n🤖 *AI-Powered:* Granola-style intelligent summaries\n💬 *Manual Trigger:* Mention @Paper with 'summary'"
-            }
+            type: "context",
+            elements: [
+              {
+                type: "mrkdwn",
+                text: "✨ Interactive checkboxes • 👥 Real participant names • 🔄 Auto-updates every 10 messages"
+              }
+            ]
           }
-        ]
+        ],
+        unfurl_links: true,
+        unfurl_media: true
       });
     } else {
       // Update existing canvas with enhanced content
@@ -244,24 +280,22 @@ async function updateCanvas(channelId, summary) {
       
       console.log(`✅ Canvas updated successfully: ${canvasId}`);
       
-      // Optional: Subtle update notification (only for manual triggers)
-      if (Math.random() < 0.3) { // 30% chance to avoid spam
-        await app.client.chat.postMessage({
-          channel: channelId,
-          text: "🔄 *Paper* Canvas updated with latest conversation insights!",
-          blocks: [
-            {
-              type: "context",
-              elements: [
-                {
-                  type: "mrkdwn",
-                  text: "🔄 Canvas refreshed • Check the Canvas tab for updated summary"
-                }
-              ]
-            }
-          ]
-        });
-      }
+      // Subtle update notification for manual triggers
+      await app.client.chat.postMessage({
+        channel: channelId,
+        text: "🔄 Canvas updated with latest insights",
+        blocks: [
+          {
+            type: "context",
+            elements: [
+              {
+                type: "mrkdwn",
+                text: "📄 Canvas refreshed with new action items and participant insights • ✅ Interactive checkboxes ready"
+              }
+            ]
+          }
+        ]
+      });
     }
   } catch (error) {
     console.error('❌ Canvas API error:', error);
