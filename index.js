@@ -562,11 +562,13 @@ app.event('app_mention', async ({ event, say }) => {
         
         console.log(`Found ${conversationMessages.length} messages to summarize`);
         
-        if (conversationMessages.length > 0) {
+        if (conversationMessages.length >= 3) {
           const summaryData = await generateSummary(conversationMessages);
           await updateCanvas(channelId, summaryData);
+        } else if (conversationMessages.length > 0) {
+          await say(`📄 I found ${conversationMessages.length} message${conversationMessages.length === 1 ? '' : 's'}, but need at least 3 messages to create a meaningful summary. Have a conversation with your team and try again!`);
         } else {
-          await say("📄 No recent conversation found to summarize. Try having a conversation first!");
+          await say("📄 This channel seems quiet! Start a conversation with your team (3+ messages) and I'll create a beautiful Canvas summary for you. ✨");
         }
       } else {
         await say("📄 No conversation history found in this channel.");
@@ -583,6 +585,12 @@ app.event('app_mention', async ({ event, say }) => {
 // Handle app installation
 app.event('app_home_opened', async ({ event, client }) => {
   try {
+    // Ensure we have a valid user ID
+    if (!event.user) {
+      console.log('⚠️ App home opened but no user ID provided');
+      return;
+    }
+    
     await client.views.publish({
       user_id: event.user,
       view: {
@@ -817,8 +825,12 @@ app.error((error) => {
           console.log('✅ OAuth tokens exchanged successfully:', result.team?.name);
           console.log('✅ Paper installed in workspace:', result.team?.id);
         } catch (error) {
-          console.error('❌ OAuth token exchange failed:', error);
-          // Still show success to user, but log the error
+          if (error.data?.error === 'invalid_code') {
+            console.log('ℹ️ OAuth code already used (this is normal for page refreshes)');
+          } else {
+            console.error('❌ OAuth token exchange failed:', error);
+          }
+          // Still show success to user since they've already authorized
         }
         res.send(`
           <!DOCTYPE html>
