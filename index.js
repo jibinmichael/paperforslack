@@ -442,12 +442,38 @@ app.error((error) => {
   console.error('Slack app error:', error);
 });
 
-// Start the app
+// Start the app with HTTP server for Render port binding
 (async () => {
   try {
     const port = process.env.PORT || 10000;
-    await app.start(port);
-    console.log(`⚡️ Paper Slack app is running on port ${port}!`);
+    
+    // Start Slack app in Socket Mode (no HTTP needed for Slack)
+    await app.start();
+    console.log(`⚡️ Paper Slack app connected via Socket Mode!`);
+    
+    // Start HTTP server for Render port detection
+    const express = require('express');
+    const httpApp = express();
+    
+    // Health check endpoint
+    httpApp.get('/', (req, res) => {
+      res.json({ 
+        status: 'healthy', 
+        app: 'Paper Slack Canvas Summarizer',
+        mode: 'Socket Mode',
+        timestamp: new Date().toISOString()
+      });
+    });
+    
+    httpApp.get('/health', (req, res) => {
+      res.json({ status: 'ok', timestamp: Date.now() });
+    });
+    
+    // Start HTTP server on the required port
+    httpApp.listen(port, '0.0.0.0', () => {
+      console.log(`🌐 HTTP server running on port ${port} for Render!`);
+    });
+    
   } catch (error) {
     console.error('Failed to start app:', error);
     process.exit(1);
