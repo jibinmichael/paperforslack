@@ -184,13 +184,9 @@ async function generateSummary(messages) {
   }
 }
 
-// Create beautiful Canvas with enhanced formatting
+// Create beautiful Canvas with enhanced formatting (no title duplication)
 async function createCanvasContent(summary) {
-  return `# 📄 Paper: Conversation Summary
-
----
-
-${summary}
+  return `${summary}
 
 ---
 
@@ -207,11 +203,70 @@ ${summary}
 *💡 Mention @Paper with "summary" to trigger manual updates*`;
 }
 
+// Check if channel already has a canvas
+async function getExistingCanvasId(channelId) {
+  try {
+    const channelInfo = await app.client.conversations.info({
+      channel: channelId,
+      include_locale: false
+    });
+    
+    // Check if channel has a canvas in properties
+    if (channelInfo.channel.properties && channelInfo.channel.properties.canvas) {
+      return channelInfo.channel.properties.canvas.document_id;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error checking for existing canvas:', error);
+    return null;
+  }
+}
+
+// Generate dynamic canvas title based on conversation content
+async function generateCanvasTitle(summary) {
+  try {
+    const titlePrompt = `Based on this conversation summary, generate a SHORT, descriptive title (max 6 words) that captures the main topic or purpose of the discussion. Return ONLY the title, nothing else:
+
+${summary.substring(0, 500)}...`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4",
+      messages: [
+        {
+          role: "user",
+          content: titlePrompt
+        }
+      ],
+      max_tokens: 50,
+      temperature: 0.3
+    });
+
+    const title = response.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+    return `📄 ${title}`;
+  } catch (error) {
+    console.error('Error generating canvas title:', error);
+    return "📄 Conversation Summary";
+  }
+}
+
 // Create or update summary using Canvas API
 async function updateCanvas(channelId, summary) {
   try {
+    // First check if we have a stored canvas ID
     let canvasId = canvasData.get(channelId);
+    
+    // If not, check if channel already has a canvas
+    if (!canvasId) {
+      canvasId = await getExistingCanvasId(channelId);
+      if (canvasId) {
+        canvasData.set(channelId, canvasId);
+        console.log('📄 Found existing canvas for channel:', channelId, 'Canvas ID:', canvasId);
+      }
+    }
+    
     const canvasContent = await createCanvasContent(summary);
+    const canvasTitle = await generateCanvasTitle(summary);
     
     if (!canvasId) {
       // Create new channel canvas using the correct API
@@ -219,7 +274,7 @@ async function updateCanvas(channelId, summary) {
       
       const response = await app.client.apiCall('conversations.canvases.create', {
         channel_id: channelId,
-        title: "📄 Paper: Conversation Summary",
+        title: canvasTitle,
         document_content: {
           type: "markdown",
           markdown: canvasContent
@@ -239,13 +294,13 @@ async function updateCanvas(channelId, summary) {
       // Notify channel with Canvas link and preview
       await app.client.chat.postMessage({
         channel: channelId,
-        text: `📄 *Paper has created your conversation summary Canvas!*\n\n🔗 View Canvas: ${canvasUrl}`,
+        text: `📄 *Paper has created: "${canvasTitle}"*\n\n🔗 View Canvas: ${canvasUrl}`,
         blocks: [
           {
             type: "section",
             text: {
               type: "mrkdwn",
-              text: `📄 *Paper has created your conversation summary Canvas!*\n\n🔗 <${canvasUrl}|📄 Open Conversation Summary Canvas>`
+              text: `📄 *Paper created: "${canvasTitle}"*\n\n🔗 <${canvasUrl}|📄 Open Canvas> • One canvas per channel, auto-updated`
             }
           },
           {
@@ -253,7 +308,7 @@ async function updateCanvas(channelId, summary) {
             elements: [
               {
                 type: "mrkdwn",
-                text: "✨ Interactive checkboxes • 👥 Real participant names • 🔄 Auto-updates every 10 messages"
+                text: "✨ Interactive checkboxes • 👥 Real names • 🏷️ Dynamic titles • 🔄 Auto-updates every 10 min"
               }
             ]
           }
@@ -265,6 +320,7 @@ async function updateCanvas(channelId, summary) {
       // Update existing canvas with enhanced content
       console.log('🔄 Updating existing canvas:', canvasId);
       
+      // Update canvas content and title
       await app.client.apiCall('canvases.edit', {
         canvas_id: canvasId,
         changes: [
@@ -277,6 +333,21 @@ async function updateCanvas(channelId, summary) {
           }
         ]
       });
+      
+      // Also update the title dynamically
+      try {
+        await app.client.apiCall('canvases.edit', {
+          canvas_id: canvasId,
+          changes: [
+            {
+              operation: "replace",
+              title: canvasTitle
+            }
+          ]
+        });
+      } catch (titleError) {
+        console.log('Note: Could not update canvas title (may not be supported)');
+      }
       
       console.log(`✅ Canvas updated successfully: ${canvasId}`);
       
@@ -460,7 +531,31 @@ app.event('app_home_opened', async ({ event, client }) => {
   }
 });
 
-// Cleanup old data periodically
+// Auto-update canvases periodically for active channels
+async function autoUpdateCanvases() {
+  console.log('🔄 Running automatic canvas updates...');
+  
+  for (const [channelId, data] of channelData.entries()) {
+    // Only update if there are recent messages and enough time has passed
+    const timeSinceLastUpdate = Date.now() - data.lastBatchTime;
+    const hasRecentActivity = data.messages.length > 0;
+    const shouldUpdate = timeSinceLastUpdate >= (15 * 60 * 1000); // 15 minutes
+    
+    if (hasRecentActivity && shouldUpdate && !data.pendingUpdate) {
+      console.log(`🔄 Auto-updating canvas for channel: ${channelId}`);
+      try {
+        await processBatch(channelId);
+      } catch (error) {
+        console.error(`Error auto-updating canvas for ${channelId}:`, error);
+      }
+    }
+  }
+}
+
+// Run auto-updates every 10 minutes
+setInterval(autoUpdateCanvases, 10 * 60 * 1000);
+
+// Cleanup old data periodically  
 setInterval(() => {
   const oneHourAgo = Date.now() - (60 * 60 * 1000);
   

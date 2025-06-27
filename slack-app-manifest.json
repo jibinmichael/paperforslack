@@ -29,7 +29,9 @@
         "im:write",
         "mpim:write",
         "groups:read",
-        "groups:history"
+        "groups:history",
+        "users:read",
+        "team:read"
       ]
     }
   },
