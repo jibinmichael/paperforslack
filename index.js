@@ -592,8 +592,21 @@ app.event('app_home_opened', async ({ event, client }) => {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: '*📄 Welcome to Paper!*\n\nI automatically summarize channel conversations in Slack Canvas format.\n\n• Add me to any channel\n• I\'ll create a summary canvas automatically\n• Summaries update every few minutes\n• Mention me with "summary" for manual updates'
+              text: '*📄 Welcome to Paper!*\n\n🎯 *AI-Powered Conversation Intelligence*\nI automatically create beautiful Canvas summaries of your team conversations using advanced AI.'
             }
+          },
+          {
+            type: 'section',
+            fields: [
+              {
+                type: 'mrkdwn',
+                text: '*✨ What I Do:*\n• Create AI Canvas summaries\n• Extract action items with ✅ checkboxes\n• Group links & dates automatically\n• Update every 10 messages or 2 minutes'
+              },
+              {
+                type: 'mrkdwn',
+                text: '*🚀 How to Use:*\n• Add me to any channel\n• Have conversations naturally\n• Watch Canvas summaries appear!\n• Type `@Paper summary` for manual updates'
+              }
+            ]
           },
           {
             type: 'divider'
@@ -602,7 +615,14 @@ app.event('app_home_opened', async ({ event, client }) => {
             type: 'section',
             text: {
               type: 'mrkdwn',
-              text: '*🔧 How it works:*\n• Listens to channel messages\n• Batches them intelligently\n• Creates Granola-style summaries\n• Updates canvas automatically'
+              text: '*🎨 Features:*\n> Smart conversation analysis with GPT-4\n> Clickable user mentions in summaries\n> Professional Granola-style formatting\n> One persistent canvas per channel\n> Strategic blockquotes for key insights'
+            }
+          },
+          {
+            type: 'section',
+            text: {
+              type: 'mrkdwn',
+              text: '*💡 Pro Tip:* Add me to your most active channels and watch your team\'s conversation insights come to life! Perfect for meetings, planning sessions, and decision tracking.'
             }
           }
         ]
@@ -691,18 +711,90 @@ app.error((error) => {
           <html>
             <head>
               <title>Paper Installation Failed</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
               <style>
-                body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f8f9fa; }
-                .container { max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-                .error { color: #e74c3c; }
+                * { 
+                  margin: 0; 
+                  padding: 0; 
+                  box-sizing: border-box; 
+                }
+                
+                body { 
+                  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+                  background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+                  min-height: 100vh;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  padding: 20px;
+                }
+                
+                .container { 
+                  max-width: 500px;
+                  width: 100%;
+                  background: rgba(255, 255, 255, 0.95);
+                  backdrop-filter: blur(10px);
+                  padding: 60px 40px;
+                  border-radius: 20px;
+                  box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                  text-align: center;
+                  border: 1px solid rgba(255,255,255,0.2);
+                }
+                
+                .error { 
+                  color: #e74c3c; 
+                  font-size: 32px;
+                  font-weight: 700;
+                  margin-bottom: 16px;
+                  letter-spacing: -0.02em;
+                }
+                
+                .subtitle {
+                  color: #6c757d;
+                  font-size: 18px;
+                  margin-bottom: 20px;
+                  font-weight: 400;
+                }
+                
+                .error-detail {
+                  background: #f8f9fa;
+                  border-left: 4px solid #e74c3c;
+                  padding: 16px;
+                  margin: 20px 0;
+                  border-radius: 8px;
+                  text-align: left;
+                  font-family: 'Monaco', 'Menlo', monospace;
+                  font-size: 14px;
+                  color: #495057;
+                }
+                
+                .btn { 
+                  display: inline-block;
+                  background: linear-gradient(135deg, #ff6b6b 0%, #ee5a52 100%);
+                  color: white;
+                  padding: 16px 32px;
+                  text-decoration: none;
+                  border-radius: 12px;
+                  margin-top: 20px;
+                  font-weight: 600;
+                  font-size: 16px;
+                  transition: all 0.3s ease;
+                }
+                
+                .btn:hover {
+                  transform: translateY(-2px);
+                  box-shadow: 0 12px 24px rgba(255, 107, 107, 0.3);
+                }
               </style>
             </head>
             <body>
               <div class="container">
-                <h2 class="error">❌ Installation Failed</h2>
-                <p>Sorry, there was an error installing Paper to your Slack workspace.</p>
-                <p><strong>Error:</strong> ${error}</p>
-                <a href="/">Try Again</a>
+                <h1 class="error">❌ Installation Failed</h1>
+                <p class="subtitle">Sorry, there was an error installing Paper to your Slack workspace.</p>
+                <div class="error-detail">
+                  <strong>Error:</strong> ${error}
+                </div>
+                <a href="/" class="btn">Try Again</a>
               </div>
             </body>
           </html>
@@ -733,34 +825,180 @@ app.error((error) => {
           <html>
             <head>
               <title>Paper Installed Successfully!</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
               <style>
-                body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f8f9fa; }
-                .container { max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-                .success { color: #27ae60; }
-                .btn { display: inline-block; background: #4CAF50; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; margin-top: 20px; }
-                .feature { margin: 10px 0; text-align: left; }
+                * { 
+                  margin: 0; 
+                  padding: 0; 
+                  box-sizing: border-box; 
+                }
+                
+                body { 
+                  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+                  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                  min-height: 100vh;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  padding: 20px;
+                }
+                
+                .container { 
+                  max-width: 600px;
+                  width: 100%;
+                  background: rgba(255, 255, 255, 0.95);
+                  backdrop-filter: blur(10px);
+                  padding: 60px 40px;
+                  border-radius: 20px;
+                  box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                  text-align: center;
+                  border: 1px solid rgba(255,255,255,0.2);
+                }
+                
+                .success { 
+                  color: #27ae60; 
+                  font-size: 32px;
+                  font-weight: 700;
+                  margin-bottom: 16px;
+                  letter-spacing: -0.02em;
+                }
+                
+                .subtitle {
+                  color: #6c757d;
+                  font-size: 18px;
+                  margin-bottom: 40px;
+                  font-weight: 400;
+                }
+                
+                .features-grid {
+                  display: grid;
+                  grid-template-columns: 1fr 1fr;
+                  gap: 30px;
+                  margin: 40px 0;
+                  text-align: left;
+                }
+                
+                .feature-column h3 {
+                  color: #2d3748;
+                  font-size: 18px;
+                  font-weight: 600;
+                  margin-bottom: 16px;
+                  display: flex;
+                  align-items: center;
+                  gap: 8px;
+                }
+                
+                .feature { 
+                  color: #4a5568;
+                  margin: 12px 0;
+                  font-size: 15px;
+                  line-height: 1.5;
+                  display: flex;
+                  align-items: flex-start;
+                  gap: 8px;
+                }
+                
+                .feature::before {
+                  content: "✅";
+                  flex-shrink: 0;
+                  margin-top: 1px;
+                }
+                
+                .usage-step {
+                  color: #4a5568;
+                  margin: 12px 0;
+                  font-size: 15px;
+                  line-height: 1.5;
+                  display: flex;
+                  align-items: flex-start;
+                  gap: 12px;
+                }
+                
+                .step-number {
+                  background: #667eea;
+                  color: white;
+                  width: 24px;
+                  height: 24px;
+                  border-radius: 50%;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  font-size: 12px;
+                  font-weight: 600;
+                  flex-shrink: 0;
+                  margin-top: 1px;
+                }
+                
+                .btn { 
+                  display: inline-block;
+                  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                  color: white;
+                  padding: 16px 32px;
+                  text-decoration: none;
+                  border-radius: 12px;
+                  margin-top: 30px;
+                  font-weight: 600;
+                  font-size: 16px;
+                  transition: all 0.3s ease;
+                  border: none;
+                  cursor: pointer;
+                }
+                
+                .btn:hover {
+                  transform: translateY(-2px);
+                  box-shadow: 0 12px 24px rgba(102, 126, 234, 0.3);
+                }
+                
+                @media (max-width: 768px) {
+                  .features-grid {
+                    grid-template-columns: 1fr;
+                    gap: 25px;
+                  }
+                  
+                  .container {
+                    padding: 40px 30px;
+                  }
+                  
+                  .success {
+                    font-size: 28px;
+                  }
+                }
               </style>
             </head>
             <body>
               <div class="container">
-                <h2 class="success">🎉 Paper Installed Successfully!</h2>
-                <p>Your AI conversation summarizer is ready to use!</p>
+                <h1 class="success">🎉 Paper Installed Successfully!</h1>
+                <p class="subtitle">Your AI conversation summarizer is ready to use!</p>
                 
-                <div style="margin: 30px 0;">
-                  <h3>📄 What Paper Does:</h3>
-                  <div class="feature">✅ Creates AI-powered Canvas summaries</div>
-                  <div class="feature">✅ Extracts action items with checkboxes</div>
-                  <div class="feature">✅ Groups links and dates automatically</div>
-                  <div class="feature">✅ Updates every 10 minutes or 10 messages</div>
-                  <div class="feature">✅ One canvas per channel - always updated</div>
-                </div>
+                <div class="features-grid">
+                  <div class="feature-column">
+                    <h3>📄 What Paper Does</h3>
+                    <div class="feature">Creates AI-powered Canvas summaries</div>
+                    <div class="feature">Extracts action items with checkboxes</div>
+                    <div class="feature">Groups links and dates automatically</div>
+                    <div class="feature">Updates every 10 minutes or 10 messages</div>
+                    <div class="feature">One canvas per channel - always updated</div>
+                  </div>
 
-                <div style="margin: 30px 0;">
-                  <h3>🚀 How to Use:</h3>
-                  <div class="feature">1. Add @Paper to any channel</div>
-                  <div class="feature">2. Have a conversation (5+ messages)</div>
-                  <div class="feature">3. Watch Paper create beautiful Canvas summaries!</div>
-                  <div class="feature">4. Type <code>@Paper summary</code> for manual updates</div>
+                  <div class="feature-column">
+                    <h3>🚀 How to Use</h3>
+                    <div class="usage-step">
+                      <span class="step-number">1</span>
+                      <span>Add @Paper to any channel</span>
+                    </div>
+                    <div class="usage-step">
+                      <span class="step-number">2</span>
+                      <span>Have a conversation (5+ messages)</span>
+                    </div>
+                    <div class="usage-step">
+                      <span class="step-number">3</span>
+                      <span>Watch Paper create beautiful Canvas summaries!</span>
+                    </div>
+                    <div class="usage-step">
+                      <span class="step-number">4</span>
+                      <span>Type <code>@Paper summary</code> for manual updates</span>
+                    </div>
+                  </div>
                 </div>
 
                 <a href="slack://app" class="btn">Open Slack</a>
@@ -774,16 +1012,75 @@ app.error((error) => {
           <html>
             <head>
               <title>Paper Installation</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
               <style>
-                body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f8f9fa; }
-                .container { max-width: 500px; margin: 0 auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+                * { 
+                  margin: 0; 
+                  padding: 0; 
+                  box-sizing: border-box; 
+                }
+                
+                body { 
+                  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+                  background: linear-gradient(135deg, #ffd93d 0%, #ff9500 100%);
+                  min-height: 100vh;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  padding: 20px;
+                }
+                
+                .container { 
+                  max-width: 500px;
+                  width: 100%;
+                  background: rgba(255, 255, 255, 0.95);
+                  backdrop-filter: blur(10px);
+                  padding: 60px 40px;
+                  border-radius: 20px;
+                  box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                  text-align: center;
+                  border: 1px solid rgba(255,255,255,0.2);
+                }
+                
+                .title { 
+                  color: #f39c12; 
+                  font-size: 32px;
+                  font-weight: 700;
+                  margin-bottom: 16px;
+                  letter-spacing: -0.02em;
+                }
+                
+                .subtitle {
+                  color: #6c757d;
+                  font-size: 18px;
+                  margin-bottom: 30px;
+                  font-weight: 400;
+                }
+                
+                .btn { 
+                  display: inline-block;
+                  background: linear-gradient(135deg, #ffd93d 0%, #ff9500 100%);
+                  color: white;
+                  padding: 16px 32px;
+                  text-decoration: none;
+                  border-radius: 12px;
+                  margin-top: 20px;
+                  font-weight: 600;
+                  font-size: 16px;
+                  transition: all 0.3s ease;
+                }
+                
+                .btn:hover {
+                  transform: translateY(-2px);
+                  box-shadow: 0 12px 24px rgba(255, 217, 61, 0.3);
+                }
               </style>
             </head>
             <body>
               <div class="container">
-                <h2>📄 Paper Installation</h2>
-                <p>Something went wrong. Please try installing again.</p>
-                <a href="/">Return to Home</a>
+                <h1 class="title">📄 Paper Installation</h1>
+                <p class="subtitle">Something went wrong. Please try installing again.</p>
+                <a href="/" class="btn">Return to Home</a>
               </div>
             </body>
           </html>
