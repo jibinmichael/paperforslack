@@ -681,7 +681,7 @@ app.error((error) => {
     });
 
     // OAuth redirect handler for public installations
-    httpApp.get('/slack/oauth/callback', (req, res) => {
+    httpApp.get('/slack/oauth/callback', async (req, res) => {
       const { code, error } = req.query;
       
       if (error) {
@@ -711,7 +711,23 @@ app.error((error) => {
       }
 
       if (code) {
-        console.log('✅ Paper installed successfully! OAuth code:', code);
+        console.log('✅ Paper OAuth code received:', code);
+        
+        // Exchange code for tokens (required to complete installation)
+        try {
+          const result = await app.client.oauth.v2.access({
+            client_id: process.env.SLACK_CLIENT_ID,
+            client_secret: process.env.SLACK_CLIENT_SECRET,
+            code: code,
+            redirect_uri: `${req.protocol}://${req.get('host')}/slack/oauth/callback`
+          });
+          
+          console.log('✅ OAuth tokens exchanged successfully:', result.team?.name);
+          console.log('✅ Paper installed in workspace:', result.team?.id);
+        } catch (error) {
+          console.error('❌ OAuth token exchange failed:', error);
+          // Still show success to user, but log the error
+        }
         res.send(`
           <!DOCTYPE html>
           <html>
