@@ -14,7 +14,7 @@ const app = new App({
   signingSecret: process.env.SLACK_SIGNING_SECRET,
   socketMode: true,
   appToken: process.env.SLACK_APP_TOKEN,
-  port: process.env.PORT || 3000
+  port: process.env.PORT || 10000
 });
 
 // In-memory storage for message batching and canvas tracking
@@ -308,7 +308,7 @@ app.error((error) => {
 // Start the app
 (async () => {
   try {
-    const port = process.env.PORT || 3000;
+    const port = process.env.PORT || 10000;
     await app.start(port);
     console.log(`⚡️ Paper Slack app is running on port ${port}!`);
   } catch (error) {
