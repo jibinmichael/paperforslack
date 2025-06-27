@@ -12,7 +12,9 @@ const openai = new OpenAI({
 const app = new App({
   token: process.env.SLACK_BOT_TOKEN,
   signingSecret: process.env.SLACK_SIGNING_SECRET,
-  processBeforeResponse: true
+  socketMode: true,
+  appToken: process.env.SLACK_APP_TOKEN,
+  port: process.env.PORT || 3000
 });
 
 // In-memory storage for message batching and canvas tracking
@@ -303,13 +305,14 @@ app.error((error) => {
   console.error('Slack app error:', error);
 });
 
-// Export for Vercel serverless
-module.exports = async (req, res) => {
+// Start the app
+(async () => {
   try {
-    // Let Slack Bolt handle all requests
-    await app.receiver.app(req, res);
+    const port = process.env.PORT || 3000;
+    await app.start(port);
+    console.log(`⚡️ Paper Slack app is running on port ${port}!`);
   } catch (error) {
-    console.error('Error handling request:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('Failed to start app:', error);
+    process.exit(1);
   }
-}; 
+})(); 

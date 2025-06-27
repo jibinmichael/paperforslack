@@ -35,7 +35,6 @@
   },
   "settings": {
     "event_subscriptions": {
-      "request_url": "https://paperforslack-pi.vercel.app/api/slack",
       "bot_events": [
         "message.channels",
         "message.groups",
@@ -44,11 +43,10 @@
       ]
     },
     "interactivity": {
-      "is_enabled": true,
-      "request_url": "https://paperforslack-pi.vercel.app/api/slack"
+      "is_enabled": true
     },
     "org_deploy_enabled": false,
-    "socket_mode_enabled": false,
+    "socket_mode_enabled": true,
     "token_rotation_enabled": false
   }
 } 

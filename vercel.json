@@ -1,7 +1,0 @@
-{
-  "functions": {
-    "api/slack.js": {
-      "runtime": "nodejs18.x"
-    }
-  }
-} 
