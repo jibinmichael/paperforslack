@@ -137,72 +137,100 @@ async function generateSummary(messages) {
   }
 }
 
-// Create or update canvas
+// Create or update summary (Canvas if available, message if not)
 async function updateCanvas(channelId, summary) {
   try {
-    let canvasId = canvasData.get(channelId);
-    
-    if (!canvasId) {
-      // Create new canvas
-      const response = await app.client.canvases.create({
-        owner_id: channelId,
-        title: "📄 Paper: Conversation Summary",
-        document_content: {
-          type: "markdown",
-          markdown: summary
-        }
-      });
+    // Try Canvas API first
+    if (app.client.canvases) {
+      let canvasId = canvasData.get(channelId);
       
-      canvasId = response.canvas_id;
-      canvasData.set(channelId, canvasId);
-      
-      // Share canvas in channel
+      if (!canvasId) {
+        // Create new canvas
+        const response = await app.client.canvases.create({
+          owner_id: channelId,
+          title: "📄 Paper: Conversation Summary",
+          document_content: {
+            type: "markdown",
+            markdown: summary
+          }
+        });
+        
+        canvasId = response.canvas_id;
+        canvasData.set(channelId, canvasId);
+        
+        // Share canvas in channel
+        await app.client.chat.postMessage({
+          channel: channelId,
+          text: "📄 *Paper* has created a conversation summary canvas!",
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: "📄 *Paper* has created a conversation summary canvas for this channel!"
+              }
+            },
+            {
+              type: "actions",
+              elements: [
+                {
+                  type: "button",
+                  text: {
+                    type: "plain_text",
+                    text: "📋 View Summary Canvas"
+                  },
+                  url: `slack://canvas/${canvasId}`,
+                  action_id: "view_canvas"
+                }
+              ]
+            }
+          ]
+        });
+      } else {
+        // Update existing canvas
+        await app.client.canvases.edit({
+          canvas_id: canvasId,
+          changes: [
+            {
+              operation: "replace",
+              document_content: {
+                type: "markdown", 
+                markdown: summary
+              }
+            }
+          ]
+        });
+      }
+      console.log(`Canvas updated for channel ${channelId}`);
+    } else {
+      // Fallback: Post summary as message
       await app.client.chat.postMessage({
         channel: channelId,
-        text: "📄 *Paper* has created a conversation summary canvas!",
+        text: "📄 *Paper: Conversation Summary*",
         blocks: [
           {
             type: "section",
             text: {
               type: "mrkdwn",
-              text: "📄 *Paper* has created a conversation summary canvas for this channel!"
-            }
-          },
-          {
-            type: "actions",
-            elements: [
-              {
-                type: "button",
-                text: {
-                  type: "plain_text",
-                  text: "📋 View Summary Canvas"
-                },
-                url: `slack://canvas/${canvasId}`,
-                action_id: "view_canvas"
-              }
-            ]
-          }
-        ]
-      });
-    } else {
-      // Update existing canvas
-      await app.client.canvases.edit({
-        canvas_id: canvasId,
-        changes: [
-          {
-            operation: "replace",
-            document_content: {
-              type: "markdown", 
-              markdown: summary
+              text: `📄 *Paper: Conversation Summary*\n\n${summary}`
             }
           }
         ]
       });
+      console.log(`Summary posted as message for channel ${channelId}`);
     }
-    
-    console.log(`Canvas updated for channel ${channelId}`);
   } catch (error) {
-    console.error('Error updating canvas:', error);
+    console.error('Error updating canvas, trying message fallback:', error);
+    // Final fallback: Simple message
+    try {
+      await app.client.chat.postMessage({
+        channel: channelId,
+        text: `📄 *Paper: Conversation Summary*\n\n${summary}`
+      });
+      console.log(`Summary posted as fallback message for channel ${channelId}`);
+    } catch (fallbackError) {
+      console.error('Error posting fallback message:', fallbackError);
+    }
   }
 }
 
