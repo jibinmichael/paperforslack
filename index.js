@@ -304,4 +304,12 @@ app.error((error) => {
 });
 
 // Export for Vercel serverless
-module.exports = app.receiver.app; 
+module.exports = async (req, res) => {
+  try {
+    // Let Slack Bolt handle all requests
+    await app.receiver.app(req, res);
+  } catch (error) {
+    console.error('Error handling request:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+}; 
