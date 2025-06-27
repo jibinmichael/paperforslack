@@ -44,7 +44,7 @@ You are creating a conversation summary in Granola-style format, optimized for S
 **Format the summary exactly as follows:**
 
 ## 🗣️ **Key Participants**
-- List main contributors with their key contributions
+- **<@USER_ID>**: Their key contributions and role in discussion
 - Focus on who drove decisions or important discussions
 
 ## 💬 **Main Discussion Points**  
@@ -58,12 +58,13 @@ You are creating a conversation summary in Granola-style format, optimized for S
 - Include decision owners when mentioned
 
 ## 🎯 **Action Items & Next Steps**
-- [ ] **@Person**: Specific task or responsibility with checkbox for tracking
+- [ ] **<@USER_ID>**: Specific task or responsibility with checkbox for tracking
 - [ ] **Timeline**: Any deadlines or timeframes mentioned with checkbox
 - [ ] **Follow-up**: Required next steps or meetings with interactive checkbox
 
 ## 📌 **Key Insights & Resources**
-- Important quotes or insights
+> Important quotes or standout insights
+- Key insights and takeaways
 - Links, documents, or resources shared
 - Context that might be valuable later
 
@@ -73,6 +74,8 @@ You are creating a conversation summary in Granola-style format, optimized for S
 - Related previous discussions or decisions
 
 **Important**: 
+- Use clickable user mentions <@USER_ID> instead of names
+- Use blockquotes (>) for standout insights or important quotes
 - If the conversation is brief or lacks substantial content, focus on what WAS discussed
 - Always provide value even for short conversations
 - Use clear, professional language
@@ -152,7 +155,7 @@ async function generateSummary(messages) {
     const links = extractLinks(messages);
     const dates = extractDates(messages);
     
-    // Create conversation text with real names
+    // Create conversation text with real names and user IDs for mentions
     const conversationText = messages.map(msg => 
       `${userNames[msg.user] || msg.user}: ${msg.text}`
     ).join('\n');
@@ -161,11 +164,15 @@ async function generateSummary(messages) {
 
 **IMPORTANT FORMATTING INSTRUCTIONS:**
 - For action items, use interactive checkboxes: "- [ ] Task description"
-- Use real participant names when available: ${Object.entries(userNames).map(([id, name]) => `${id} = ${name}`).join(', ')}
-- Make action items specific and actionable
-- Include @mentions for people when assigning tasks: @${Object.values(userNames).join(', @')}
+- Use clickable user mentions for participants: ${Object.entries(userNames).map(([id, name]) => `<@${id}> (${name})`).join(', ')}
+- Make action items specific and actionable with clickable user mentions: "- [ ] Task description <@USER_ID>"
+- Use blockquotes (>) for key insights, important decisions, or standout quotes
 - If dates/times are mentioned, add a "## 📅 **Important Dates & Times**" section
 - If links are shared, they will be added separately - don't include them in your summary
+- Format participant names as clickable mentions: <@USER_ID> instead of just names
+
+**USER MAPPING FOR MENTIONS:**
+${Object.entries(userNames).map(([id, name]) => `${id} = ${name} (use <@${id}>)`).join('\n')}
 
 **EXTRACTED CONTEXT:**
 ${dates.length > 0 ? `- Dates/Times mentioned: ${dates.join(', ')}` : ''}
@@ -533,7 +540,7 @@ app.event('app_mention', async ({ event, say }) => {
   
   if (event.text.includes('summary') || event.text.includes('update')) {
     try {
-      // Fetch recent conversation history from Slack
+      // Fetch recent conversation history from Slack  
       console.log('Fetching conversation history for channel:', channelId);
       const result = await app.client.conversations.history({
         channel: channelId,
