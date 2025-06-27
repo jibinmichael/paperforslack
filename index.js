@@ -133,8 +133,8 @@ async function getUserDisplayNames(userIds) {
       const userInfo = await app.client.users.info({ user: userId });
       userNames[userId] = userInfo.user.real_name || userInfo.user.display_name || userInfo.user.name;
     } catch (error) {
-      console.error(`Error fetching user info for ${userId}:`, error);
-      userNames[userId] = userId; // Fallback to user ID
+      console.log(`⚠️ Cannot fetch user info (missing users:read scope), using user ID: ${userId}`);
+      userNames[userId] = `User ${userId.substring(0,8)}`; // More readable fallback
     }
   }
   
@@ -286,10 +286,15 @@ async function updateCanvas(channelId, summary) {
       
       console.log(`✅ Channel Canvas created successfully: ${canvasId}`);
       
-      // Get workspace info for Canvas link
-      const teamInfo = await app.client.team.info();
-      const workspaceUrl = `https://${teamInfo.team.domain}.slack.com`;
-      const canvasUrl = `${workspaceUrl}/docs/${teamInfo.team.id}/${canvasId}`;
+      // Get workspace info for Canvas link (with fallback for missing team:read scope)
+      let canvasUrl = `https://slack.com/canvas/${canvasId}`; // Generic fallback
+      try {
+        const teamInfo = await app.client.team.info();
+        const workspaceUrl = `https://${teamInfo.team.domain}.slack.com`;
+        canvasUrl = `${workspaceUrl}/docs/${teamInfo.team.id}/${canvasId}`;
+      } catch (error) {
+        console.log(`⚠️ Cannot fetch team info (missing team:read scope), using generic Canvas URL`);
+      }
       
       // Notify channel with Canvas link and preview
       await app.client.chat.postMessage({
@@ -345,8 +350,9 @@ async function updateCanvas(channelId, summary) {
             }
           ]
         });
+        console.log(`📝 Canvas title updated to: ${canvasTitle}`);
       } catch (titleError) {
-        console.log('Note: Could not update canvas title (may not be supported)');
+        console.log('📝 Canvas title update not supported by API, keeping original title');
       }
       
       console.log(`✅ Canvas updated successfully: ${canvasId}`);
