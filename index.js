@@ -187,7 +187,7 @@ async function updateCanvas(channelId, summary) {
       // Create new channel canvas using the correct API
       console.log('🎨 Creating new channel canvas:', channelId);
       
-      const response = await app.client.conversations.canvases.create({
+      const response = await app.client.apiCall('conversations.canvases.create', {
         channel_id: channelId,
         title: "📄 Paper: Conversation Summary",
         document_content: {
@@ -229,7 +229,7 @@ async function updateCanvas(channelId, summary) {
       // Update existing canvas with enhanced content
       console.log('🔄 Updating existing canvas:', canvasId);
       
-      await app.client.canvases.edit({
+      await app.client.apiCall('canvases.edit', {
         canvas_id: canvasId,
         changes: [
           {
