@@ -261,6 +261,13 @@ async function getExistingCanvasId(channelId) {
     
     return null;
   } catch (error) {
+    if (error.data?.error === 'channel_not_found') {
+      console.log(`⚠️ Channel ${channelId} not accessible - app may have been removed`);
+      // Clean up data for inaccessible channel
+      channelData.delete(channelId);
+      canvasData.delete(channelId);
+      return 'CHANNEL_INACCESSIBLE';
+    }
     console.error('Error checking for existing canvas:', error);
     return null;
   }
@@ -363,6 +370,10 @@ async function updateCanvas(channelId, summaryData) {
     // If not, check if channel already has a canvas
     if (!canvasId) {
       canvasId = await getExistingCanvasId(channelId);
+      if (canvasId === 'CHANNEL_INACCESSIBLE') {
+        console.log(`🚫 Skipping inaccessible channel: ${channelId}`);
+        return; // Exit early for inaccessible channels
+      }
       if (canvasId) {
         canvasData.set(channelId, canvasId);
         console.log('📄 Found existing canvas for channel:', channelId, 'Canvas ID:', canvasId);
@@ -453,6 +464,14 @@ async function updateCanvas(channelId, summaryData) {
       console.log(`✅ Canvas updated successfully: ${canvasId}`);
     }
   } catch (error) {
+    if (error.data?.error === 'channel_not_found') {
+      console.log(`🚫 Channel ${channelId} became inaccessible during Canvas operation`);
+      // Clean up data for inaccessible channel
+      channelData.delete(channelId);
+      canvasData.delete(channelId);
+      return;
+    }
+    
     console.error('❌ Canvas API error:', error);
     
     // Enhanced fallback with better formatting
@@ -491,7 +510,13 @@ async function updateCanvas(channelId, summaryData) {
       });
       console.log(`📄 Enhanced summary posted as message for channel ${channelId}`);
     } catch (fallbackError) {
-      console.error('❌ Error posting fallback message:', fallbackError);
+      if (fallbackError.data?.error === 'channel_not_found') {
+        console.log(`🚫 Channel ${channelId} inaccessible for fallback message too - cleaning up`);
+        channelData.delete(channelId);
+        canvasData.delete(channelId);
+      } else {
+        console.error('❌ Error posting fallback message:', fallbackError);
+      }
     }
   }
 }
@@ -656,7 +681,13 @@ async function autoUpdateCanvases() {
       try {
         await processBatch(channelId);
       } catch (error) {
-        console.error(`Error auto-updating canvas for ${channelId}:`, error);
+        if (error.message && error.message.includes('channel_not_found')) {
+          console.log(`🚫 Cleaning up inaccessible channel: ${channelId}`);
+          channelData.delete(channelId);
+          canvasData.delete(channelId);
+        } else {
+          console.error(`Error auto-updating canvas for ${channelId}:`, error);
+        }
       }
     }
   }
