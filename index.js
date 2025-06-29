@@ -20,13 +20,18 @@ const app = new App({
 // In-memory storage for message batching and canvas tracking
 const channelData = new Map();
 const canvasData = new Map();
+const bootstrappedChannels = new Set(); // Track channels we've already bootstrapped
 
-// Configuration
+// Configuration - Enhanced for multi-day conversations
 const CONFIG = {
   BATCH_TIME_WINDOW: 2 * 60 * 1000, // 2 minutes
   BATCH_MESSAGE_LIMIT: 10,
   CANVAS_UPDATE_DEBOUNCE: 3 * 60 * 1000, // 3 minutes
-  MAX_MESSAGES_FOR_SUMMARY: 50
+  MAX_MESSAGES_FOR_SUMMARY: 500, // Increased for multi-day conversations
+  MAX_CONVERSATION_HISTORY: 1000, // Max fetch from Slack API
+  AI_TOKEN_SAFE_LIMIT: 400, // Safe message count to avoid token limits
+  BOOTSTRAP_DAYS_LOOKBACK: 14, // Days to look back when joining existing channels
+  MIN_MESSAGES_FOR_BOOTSTRAP: 10 // Minimum messages needed to create bootstrap Canvas
 };
 
 // Enhanced Granola-style prompt for Canvas formatting
@@ -144,19 +149,57 @@ async function getUserDisplayNames(userIds) {
   return userNames;
 }
 
-// Generate AI summary with enhanced formatting
+// Smart message selection for very long conversations
+function selectMessagesForSummary(messages) {
+  if (messages.length <= CONFIG.AI_TOKEN_SAFE_LIMIT) {
+    return messages; // No need to filter
+  }
+  
+  console.log(`📊 Long conversation detected: ${messages.length} messages, selecting best ${CONFIG.AI_TOKEN_SAFE_LIMIT} for summary`);
+  
+  // For very long conversations, use a smart selection strategy:
+  // 1. Keep the first 50 messages (conversation start context)
+  // 2. Keep the last 300 messages (recent context)  
+  // 3. Sample 50 messages from the middle (continuity)
+  
+  const startMessages = messages.slice(0, 50);
+  const endMessages = messages.slice(-300);
+  
+  if (messages.length > 350) {
+    // Sample from middle section
+    const middleStart = 50;
+    const middleEnd = messages.length - 300;
+    const middleSection = messages.slice(middleStart, middleEnd);
+    
+    // Sample every nth message from middle
+    const sampleRate = Math.ceil(middleSection.length / 50);
+    const middleSample = middleSection.filter((_, index) => index % sampleRate === 0).slice(0, 50);
+    
+    return [...startMessages, ...middleSample, ...endMessages];
+  } else {
+    return [...startMessages, ...endMessages];
+  }
+}
+
+// Generate AI summary with enhanced formatting for multi-day conversations
 async function generateSummary(messages) {
   try {
+    // Smart selection for very long conversations to avoid token limits
+    const selectedMessages = selectMessagesForSummary(messages);
+    const isFiltered = selectedMessages.length < messages.length;
+    
+    console.log(`📝 Generating summary from ${selectedMessages.length} messages${isFiltered ? ` (filtered from ${messages.length})` : ''}`);
+    
     // Get user display names
-    const userIds = messages.map(msg => msg.user);
+    const userIds = selectedMessages.map(msg => msg.user);
     const userNames = await getUserDisplayNames(userIds);
     
-    // Extract links and dates
+    // Extract links and dates from ALL messages (not just selected ones)
     const links = extractLinks(messages);
     const dates = extractDates(messages);
     
     // Create conversation text with real names and user IDs for mentions
-    const conversationText = messages.map(msg => 
+    const conversationText = selectedMessages.map(msg => 
       `${userNames[msg.user] || msg.user}: ${msg.text}`
     ).join('\n');
 
@@ -173,6 +216,10 @@ async function generateSummary(messages) {
 
 **USER MAPPING FOR MENTIONS:**
 ${Object.entries(userNames).map(([id, name]) => `${id} = ${name} (use <@${id}>)`).join('\n')}
+
+**CONVERSATION CONTEXT:**
+${isFiltered ? `- This is a LONG conversation (${messages.length} total messages) - you're seeing selected key messages from beginning, middle, and recent activity` : `- Complete conversation with ${messages.length} messages`}
+${isFiltered ? '- Focus on capturing the overall flow, key decisions, and current status even though some messages are omitted' : ''}
 
 **EXTRACTED CONTEXT:**
 ${dates.length > 0 ? `- Dates/Times mentioned: ${dates.join(', ')}` : ''}
@@ -197,14 +244,24 @@ ${links.length > 0 ? `- Links shared: ${links.length} links (will be grouped sep
     return {
       summary: response.choices[0].message.content,
       links: links,
-      dates: dates
+      dates: dates,
+      messageCount: {
+        total: messages.length,
+        processed: selectedMessages.length,
+        isFiltered: isFiltered
+      }
     };
   } catch (error) {
     console.error('Error generating summary:', error);
     return {
       summary: "❌ Error generating summary. Please try again later.",
       links: [],
-      dates: []
+      dates: [],
+      messageCount: {
+        total: messages.length,
+        processed: 0,
+        isFiltered: false
+      }
     };
   }
 }
@@ -229,16 +286,25 @@ async function createCanvasContent(summaryData) {
     });
   }
   
+  const messageInfo = summaryData.messageCount;
+  const messageStats = messageInfo ? 
+    (messageInfo.isFiltered ? 
+      `📊 Summarized ${messageInfo.processed} key messages from ${messageInfo.total} total messages` :
+      `📊 Summarized all ${messageInfo.total} messages`) : '';
+
   content += `\n\n---
 
 *🤖 Auto-generated by Paper • Last updated: ${new Date().toLocaleString()}*
+${messageStats ? `\n*${messageStats}*` : ''}
 
 ---
 
 ### 🔄 **How Paper Works**
+- **Smart Bootstrap**: Creates Canvas from 14 days of history when joining
 - **Smart Batching**: Summarizes every 10 messages or 2 minutes
 - **Auto-Updates**: Canvas refreshes automatically  
 - **AI-Powered**: Uses OpenAI GPT-4 for intelligent summaries
+- **Multi-Day Support**: Handles conversations with 1000+ messages
 - **Granola Format**: Structured, scannable conversation insights
 
 *💡 Mention @Paper with "summary" to trigger manual updates*`;
@@ -266,6 +332,7 @@ async function getExistingCanvasId(channelId) {
       // Clean up data for inaccessible channel
       channelData.delete(channelId);
       canvasData.delete(channelId);
+      bootstrappedChannels.delete(channelId);
       return 'CHANNEL_INACCESSIBLE';
     }
     console.error('Error checking for existing canvas:', error);
@@ -469,6 +536,7 @@ async function updateCanvas(channelId, summaryData) {
       // Clean up data for inaccessible channel
       channelData.delete(channelId);
       canvasData.delete(channelId);
+      bootstrappedChannels.delete(channelId);
       return;
     }
     
@@ -514,9 +582,97 @@ async function updateCanvas(channelId, summaryData) {
         console.log(`🚫 Channel ${channelId} inaccessible for fallback message too - cleaning up`);
         channelData.delete(channelId);
         canvasData.delete(channelId);
+        bootstrappedChannels.delete(channelId);
       } else {
         console.error('❌ Error posting fallback message:', fallbackError);
       }
+    }
+  }
+}
+
+// Bootstrap Canvas for existing channels with recent history
+async function bootstrapChannelCanvas(channelId, say = null) {
+  // Skip if already bootstrapped
+  if (bootstrappedChannels.has(channelId)) {
+    console.log(`📄 Channel ${channelId} already bootstrapped, skipping`);
+    return;
+  }
+
+  try {
+    console.log(`🎯 Bootstrapping Canvas for channel: ${channelId}`);
+    
+    // Calculate 14 days ago timestamp
+    const fourteenDaysAgo = Math.floor((Date.now() - (CONFIG.BOOTSTRAP_DAYS_LOOKBACK * 24 * 60 * 60 * 1000)) / 1000);
+    
+    // Fetch conversation history from last 14 days
+    const result = await app.client.conversations.history({
+      channel: channelId,
+      oldest: fourteenDaysAgo.toString(),
+      limit: CONFIG.MAX_CONVERSATION_HISTORY,
+      exclude_archived: true
+    });
+
+    if (result.messages && result.messages.length > 0) {
+      // Convert and filter messages
+      const conversationMessages = result.messages
+        .filter(msg => !msg.bot_id && !msg.subtype && msg.text && msg.text.trim().length > 0)
+        .reverse() // Slack gives newest first, we want chronological order
+        .map(msg => ({
+          user: msg.user,
+          text: msg.text || '',
+          timestamp: msg.ts,
+          thread_ts: msg.thread_ts
+        }));
+
+      console.log(`📊 Found ${conversationMessages.length} messages from last ${CONFIG.BOOTSTRAP_DAYS_LOOKBACK} days in channel ${channelId}`);
+
+      if (conversationMessages.length >= CONFIG.MIN_MESSAGES_FOR_BOOTSTRAP) {
+        console.log(`✅ Channel has sufficient history (${conversationMessages.length} messages), creating bootstrap Canvas`);
+        
+        const summaryData = await generateSummary(conversationMessages);
+        await updateCanvas(channelId, summaryData);
+        
+        // Notify about bootstrap with helpful message
+        if (say) {
+          if (conversationMessages.length > CONFIG.AI_TOKEN_SAFE_LIMIT) {
+            await say(`📄 Welcome! I found ${conversationMessages.length} messages from the last ${CONFIG.BOOTSTRAP_DAYS_LOOKBACK} days and created a comprehensive Canvas summary of your recent conversations! 🎨✨`);
+          } else {
+            await say(`📄 Welcome! I've created a Canvas summary of your recent ${conversationMessages.length} messages from the last ${CONFIG.BOOTSTRAP_DAYS_LOOKBACK} days. Let's keep the conversation going! 🎨✨`);
+          }
+        }
+        
+        // Mark as bootstrapped
+        bootstrappedChannels.add(channelId);
+        
+        // Initialize channel data for future messages
+        initChannelData(channelId);
+        
+        console.log(`🎉 Bootstrap complete for channel ${channelId}`);
+      } else {
+        console.log(`📝 Channel has only ${conversationMessages.length} messages (need ${CONFIG.MIN_MESSAGES_FOR_BOOTSTRAP}+), starting fresh`);
+        
+        // Still mark as "bootstrapped" to avoid checking again, but no Canvas created
+        bootstrappedChannels.add(channelId);
+        
+        // Optional: Let users know Paper is ready for new conversations
+        if (say && conversationMessages.length > 0) {
+          await say(`📄 Hi! I found some older messages but not enough recent activity. I'm ready to start creating Canvas summaries as you have new conversations! 🚀`);
+        }
+      }
+    } else {
+      console.log(`📝 No conversation history found in channel ${channelId}, starting fresh`);
+      bootstrappedChannels.add(channelId);
+    }
+    
+  } catch (error) {
+    console.error(`❌ Error bootstrapping channel ${channelId}:`, error);
+    
+    // Mark as bootstrapped even on error to avoid infinite retries
+    bootstrappedChannels.add(channelId);
+    
+    // Let user know there was an issue but Paper is still ready
+    if (say) {
+      await say(`📄 Hi! I had trouble accessing the conversation history, but I'm ready to start creating Canvas summaries as you continue chatting! 🚀`);
     }
   }
 }
@@ -542,12 +698,43 @@ async function processBatch(channelId) {
   }
 }
 
+// Handle when bot is added to a channel
+app.event('member_joined_channel', async ({ event, say, client }) => {
+  try {
+    // Get bot user ID to compare
+    const botInfo = await client.auth.test();
+    const botUserId = botInfo.user_id;
+    
+    // Only trigger bootstrap if the bot itself joined the channel
+    if (event.user === botUserId) {
+      console.log(`🎯 Paper bot added to channel: ${event.channel}, starting bootstrap...`);
+      
+      // Small delay to ensure permissions are fully set up
+      setTimeout(async () => {
+        await bootstrapChannelCanvas(event.channel, say);
+      }, 2000);
+    }
+  } catch (error) {
+    console.error('Error handling member_joined_channel event:', error);
+  }
+});
+
 // Listen to all messages
 app.message(async ({ message, say }) => {
   // Skip bot messages and system messages
   if (message.subtype || message.bot_id) return;
   
   const channelId = message.channel;
+  
+  // Bootstrap check: If this is the first time we see this channel, try to bootstrap
+  if (!bootstrappedChannels.has(channelId)) {
+    console.log(`🎯 First message detected in unboostrapped channel ${channelId}, starting bootstrap...`);
+    
+    // Bootstrap in background, don't block message processing
+    setTimeout(async () => {
+      await bootstrapChannelCanvas(channelId);
+    }, 1000);
+  }
   
   // Add message to batch
   addMessageToBatch(channelId, message);
@@ -565,11 +752,18 @@ app.event('app_mention', async ({ event, say }) => {
   
   if (event.text.includes('summary') || event.text.includes('update')) {
     try {
+      // Bootstrap check: If not bootstrapped yet, do it now
+      if (!bootstrappedChannels.has(channelId)) {
+        console.log(`🎯 Manual summary requested in unboostrapped channel ${channelId}, bootstrapping first...`);
+        await bootstrapChannelCanvas(channelId, say);
+        return; // Bootstrap will create the Canvas
+      }
+      
       // Fetch recent conversation history from Slack  
       console.log('Fetching conversation history for channel:', channelId);
       const result = await app.client.conversations.history({
         channel: channelId,
-        limit: 50,
+        limit: CONFIG.MAX_CONVERSATION_HISTORY,
         exclude_archived: true
       });
       
@@ -590,6 +784,11 @@ app.event('app_mention', async ({ event, say }) => {
         if (conversationMessages.length >= 3) {
           const summaryData = await generateSummary(conversationMessages);
           await updateCanvas(channelId, summaryData);
+          
+          // Provide feedback for very long conversations
+          if (conversationMessages.length > CONFIG.AI_TOKEN_SAFE_LIMIT) {
+            await say(`📊 Wow! This is a long conversation with ${conversationMessages.length} messages. I've created a comprehensive summary focusing on key decisions, action items, and recent activity. Canvas updated! 🎨`);
+          }
         } else if (conversationMessages.length > 0) {
           await say(`📄 I found ${conversationMessages.length} message${conversationMessages.length === 1 ? '' : 's'}, but need at least 3 messages to create a meaningful summary. Have a conversation with your team and try again!`);
         } else {
@@ -633,7 +832,7 @@ app.event('app_home_opened', async ({ event, client }) => {
             fields: [
               {
                 type: 'mrkdwn',
-                text: '*✨ What I Do:*\n• Create AI Canvas summaries\n• Extract action items with ✅ checkboxes\n• Group links & dates automatically\n• Update every 10 messages or 2 minutes'
+                text: '*✨ What I Do:*\n• Create AI Canvas summaries\n• Extract action items with ✅ checkboxes\n• Group links & dates automatically\n• Bootstrap from 14 days of history when joining channels\n• Handle multi-day conversations (1000+ messages)\n• Update every 10 messages or 2 minutes'
               },
               {
                 type: 'mrkdwn',
@@ -685,6 +884,7 @@ async function autoUpdateCanvases() {
           console.log(`🚫 Cleaning up inaccessible channel: ${channelId}`);
           channelData.delete(channelId);
           canvasData.delete(channelId);
+          bootstrappedChannels.delete(channelId);
         } else {
           console.error(`Error auto-updating canvas for ${channelId}:`, error);
         }
@@ -703,6 +903,9 @@ setInterval(() => {
   for (const [channelId, data] of channelData.entries()) {
     if (data.lastBatchTime < oneHourAgo && data.messages.length === 0) {
       channelData.delete(channelId);
+      canvasData.delete(channelId);
+      bootstrappedChannels.delete(channelId);
+      console.log(`🧹 Cleaned up inactive channel data: ${channelId}`);
     }
   }
 }, 30 * 60 * 1000); // Clean up every 30 minutes
