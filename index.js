@@ -120,6 +120,7 @@ const installationStore = {
       return installation;
     }
     console.log(`❌ No installation found for workspace: ${teamId}`);
+    console.log(`📋 Available installations: ${Array.from(this.installations.keys()).join(', ')}`);
     return undefined;
   },
   
@@ -189,8 +190,10 @@ async function getSlackClient(teamId = null) {
   if (isOAuthMode && teamId) {
     // OAuth mode: get client for specific workspace
     try {
+      console.log(`🔍 Looking up installation for team: ${teamId}`);
       const installation = await installationStore.fetchInstallation({ teamId });
       if (installation && installation.bot) {
+        console.log(`✅ Found installation for team ${teamId}, creating client`);
         return new (require('@slack/web-api').WebClient)(installation.bot.token);
       }
       console.error(`❌ No installation found for team: ${teamId}`);
@@ -201,13 +204,22 @@ async function getSlackClient(teamId = null) {
     }
   } else {
     // Token mode: use the single app client
+    console.log(`🔧 Using token mode client (isOAuthMode: ${isOAuthMode}, teamId: ${teamId})`);
     return app.client;
   }
 }
 
-// Helper function to get team ID from event context
-function getTeamId(event) {
-  return event.team_id || event.team || null;
+// Helper function to get team ID from event context or event itself
+function getTeamId(eventOrContext) {
+  // Handle both event objects and context objects
+  if (eventOrContext) {
+    return eventOrContext.teamId || 
+           eventOrContext.team_id || 
+           eventOrContext.team || 
+           (eventOrContext.context && eventOrContext.context.teamId) ||
+           null;
+  }
+  return null;
 }
 
 // Configuration - Enhanced for multi-day conversations
@@ -1210,7 +1222,8 @@ app.event('member_joined_channel', async ({ event, say, client, context }) => {
       return;
     }
     
-    const teamId = getTeamId(context);
+    const teamId = getTeamId(event) || getTeamId(context);
+    console.log(`🔍 Team ID extracted: ${teamId} from event: ${event.team}`);
     
     // Get the appropriate client for this workspace
     const workspaceClient = await getSlackClient(teamId);
