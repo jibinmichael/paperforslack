@@ -652,7 +652,209 @@ function extractDates(messages) {
   return dates;
 }
 
-// Create or update summary using Canvas API
+// Bootstrap channel with Canvas from existing conversation history (with authenticated client)
+async function bootstrapChannelCanvasWithClient(channelId, client, teamId, say = null) {
+  // Skip if already bootstrapped
+  if (bootstrappedChannels.has(channelId)) {
+    console.log(`📄 Channel ${channelId} already bootstrapped, skipping`);
+    return;
+  }
+
+  try {
+    console.log(`🎯 Bootstrapping Canvas for channel: ${channelId} in team ${teamId}`);
+    
+    // Calculate 14 days ago timestamp
+    const fourteenDaysAgo = Math.floor((Date.now() - (CONFIG.BOOTSTRAP_DAYS_LOOKBACK * 24 * 60 * 60 * 1000)) / 1000);
+    
+    // Fetch conversation history from last 14 days with better error handling
+    let result;
+    try {
+      result = await client.conversations.history({
+        channel: channelId,
+        oldest: fourteenDaysAgo.toString(),
+        limit: CONFIG.MAX_CONVERSATION_HISTORY,
+        exclude_archived: true
+      });
+    } catch (historyError) {
+      if (historyError.data?.error === 'channel_not_found') {
+        console.log(`🚫 Channel ${channelId} not accessible - app may have been removed or channel deleted`);
+        bootstrappedChannels.add(channelId); // Mark as processed to avoid retries
+        if (say) {
+          await say(`📄 Hi! I don't have access to this channel's history. Please re-add me to the channel or check my permissions! 🔧`);
+        }
+        return;
+      } else if (historyError.data?.error === 'missing_scope') {
+        console.log(`🚫 Missing required scope for channel ${channelId}: ${historyError.data.needed}`);
+        bootstrappedChannels.add(channelId);
+        if (say) {
+          await say(`📄 I need additional permissions to access this channel. Please check the app configuration! 🔧`);
+        }
+        return;
+      }
+      throw historyError; // Re-throw other errors
+    }
+
+    if (result.messages && result.messages.length > 0) {
+      // Convert and filter messages
+      const conversationMessages = result.messages
+        .filter(msg => !msg.bot_id && !msg.subtype && msg.text && msg.text.trim().length > 0)
+        .reverse() // Slack gives newest first, we want chronological order
+        .map(msg => ({
+          user: msg.user,
+          text: msg.text || '',
+          timestamp: msg.ts,
+          thread_ts: msg.thread_ts
+        }));
+
+      console.log(`📊 Found ${conversationMessages.length} messages from last ${CONFIG.BOOTSTRAP_DAYS_LOOKBACK} days in channel ${channelId}`);
+
+      if (conversationMessages.length >= CONFIG.MIN_MESSAGES_FOR_BOOTSTRAP) {
+        console.log(`✅ Channel has sufficient history (${conversationMessages.length} messages), creating bootstrap Canvas`);
+        
+        const summaryData = await generateSummary(conversationMessages);
+        await updateCanvasWithClient(channelId, summaryData, client, teamId);
+        
+        // Notify about bootstrap with helpful message
+        if (say) {
+          if (conversationMessages.length > CONFIG.AI_TOKEN_SAFE_LIMIT) {
+            await say(`📄 Welcome! I found ${conversationMessages.length} messages from the last ${CONFIG.BOOTSTRAP_DAYS_LOOKBACK} days and created a comprehensive Canvas summary of your recent conversations! 🎨✨`);
+          } else {
+            await say(`📄 Welcome! I've created a Canvas summary of your recent ${conversationMessages.length} messages from the last ${CONFIG.BOOTSTRAP_DAYS_LOOKBACK} days. Let's keep the conversation going! 🎨✨`);
+          }
+        }
+        
+        // Mark as bootstrapped
+        bootstrappedChannels.add(channelId);
+        
+        // Initialize channel data for future messages
+        initChannelData(channelId);
+        
+        console.log(`🎉 Bootstrap complete for channel ${channelId}`);
+      } else {
+        console.log(`📝 Channel has only ${conversationMessages.length} messages (need ${CONFIG.MIN_MESSAGES_FOR_BOOTSTRAP}+), starting fresh`);
+        
+        // Still mark as "bootstrapped" to avoid checking again, but no Canvas created
+        bootstrappedChannels.add(channelId);
+        
+        // Optional: Let users know Paper is ready for new conversations
+        if (say && conversationMessages.length > 0) {
+          await say(`📄 Hi! I found some older messages but not enough recent activity. I'm ready to start creating Canvas summaries as you have new conversations! 🚀`);
+        }
+      }
+    } else {
+      console.log(`📝 No conversation history found in channel ${channelId}, starting fresh`);
+      bootstrappedChannels.add(channelId);
+    }
+    
+  } catch (error) {
+    console.error(`❌ Error bootstrapping channel ${channelId}:`, error);
+    
+    // Mark as bootstrapped even on error to avoid infinite retries
+    bootstrappedChannels.add(channelId);
+    
+    // Let user know there was an issue but Paper is still ready
+    if (say) {
+      await say(`📄 Hi! I had trouble accessing the conversation history, but I'm ready to start creating Canvas summaries as you continue chatting! 🚀`);
+    }
+  }
+}
+
+// Create or update summary using Canvas API (with authenticated client)
+async function updateCanvasWithClient(channelId, summaryData, client, teamId) {
+  try {
+    // First check if we have a stored canvas ID
+    let canvasId = canvasData.get(channelId);
+    
+    // If not, check if channel already has a canvas
+    if (!canvasId) {
+      try {
+        const channelInfo = await client.conversations.info({
+          channel: channelId,
+          include_locale: false
+        });
+        
+        // Check if channel has a canvas in properties
+        if (channelInfo.channel.properties && channelInfo.channel.properties.canvas) {
+          canvasId = channelInfo.channel.properties.canvas.document_id;
+          canvasData.set(channelId, canvasId);
+          console.log('📄 Found existing canvas for channel:', channelId, 'Canvas ID:', canvasId);
+        }
+      } catch (error) {
+        if (error.data?.error === 'channel_not_found') {
+          console.log(`⚠️ Channel ${channelId} not accessible - app may have been removed`);
+          channelData.delete(channelId);
+          canvasData.delete(channelId);
+          bootstrappedChannels.delete(channelId);
+          return;
+        }
+        console.error('Error checking for existing canvas:', error);
+      }
+    }
+    
+    const canvasContent = await createCanvasContent(summaryData);
+    const canvasTitle = await generateCanvasTitle(summaryData);
+    
+    if (!canvasId) {
+      // Create new channel canvas using the correct API
+      console.log('🎨 Creating new channel canvas:', channelId);
+      
+      const response = await client.apiCall('conversations.canvases.create', {
+        channel_id: channelId,
+        title: canvasTitle,
+        document_content: {
+          type: 'markdown',
+          markdown: canvasContent
+        }
+      });
+      
+      if (response.ok) {
+        canvasId = response.canvas_id;
+        canvasData.set(channelId, canvasId);
+        console.log('✅ Canvas created successfully:', canvasId);
+      } else {
+        console.error('❌ Failed to create canvas:', response.error);
+        return;
+      }
+    } else {
+      // Update existing canvas
+      console.log('📝 Updating existing canvas:', canvasId);
+      
+      const response = await client.apiCall('canvases.edit', {
+        canvas_id: canvasId,
+        changes: [{
+          operation: 'replace',
+          document_content: {
+            type: 'markdown',
+            markdown: canvasContent
+          }
+        }]
+      });
+      
+      if (response.ok) {
+        console.log('✅ Canvas updated successfully:', canvasId);
+      } else {
+        console.error('❌ Failed to update canvas:', response.error);
+        return;
+      }
+    }
+    
+  } catch (error) {
+    console.error('❌ Error updating canvas:', error);
+    
+    // Handle specific canvas errors
+    if (error.data?.error === 'canvas_not_found') {
+      console.log('🗑️ Canvas no longer exists, clearing stored ID');
+      canvasData.delete(channelId);
+    } else if (error.data?.error === 'channel_not_found') {
+      console.log(`🚫 Cleaning up inaccessible channel: ${channelId}`);
+      channelData.delete(channelId);
+      canvasData.delete(channelId);
+      bootstrappedChannels.delete(channelId);
+    }
+  }
+}
+
+// Create or update summary using Canvas API (fallback for legacy calls)
 async function updateCanvas(channelId, summaryData) {
   try {
     // First check if we have a stored canvas ID
@@ -825,13 +1027,41 @@ async function bootstrapChannelCanvas(channelId, say = null) {
   try {
     console.log(`🎯 Bootstrapping Canvas for channel: ${channelId}`);
     
+    // Get workspace-specific client in OAuth mode
+    let client;
+    if (isOAuthMode) {
+      // Get channel info to determine team ID
+      const channelInfo = await app.client.conversations.info({ channel: channelId });
+      const teamId = channelInfo.channel?.shared_team_ids?.[0] || 'UNKNOWN';
+      
+      console.log(`🔍 Bootstrap: Getting installation for team ${teamId}`);
+      const installation = await installationStore.fetchInstallation({ teamId });
+      
+      if (!installation) {
+        console.error(`❌ No installation found for team ${teamId} during bootstrap`);
+        bootstrappedChannels.add(channelId);
+        if (say) {
+          await say("📄 Hi! I need to be properly installed in this workspace. Please reinstall Paper! 🔧");
+        }
+        return;
+      }
+      
+      // Create WebClient with workspace-specific token
+      const { WebClient } = require('@slack/web-api');
+      client = new WebClient(installation.bot.token);
+      console.log(`🔍 Bootstrap: Using workspace token ${installation.bot.token.substring(0, 15)}...`);
+    } else {
+      // Use global client in token mode
+      client = app.client;
+    }
+    
     // Calculate 14 days ago timestamp
     const fourteenDaysAgo = Math.floor((Date.now() - (CONFIG.BOOTSTRAP_DAYS_LOOKBACK * 24 * 60 * 60 * 1000)) / 1000);
     
     // Fetch conversation history from last 14 days with better error handling
     let result;
     try {
-      result = await app.client.conversations.history({
+      result = await client.conversations.history({
         channel: channelId,
         oldest: fourteenDaysAgo.toString(),
         limit: CONFIG.MAX_CONVERSATION_HISTORY,
@@ -955,19 +1185,20 @@ async function processBatch(channelId) {
 }
 
 // Handle when bot is added to a channel
-app.event('member_joined_channel', async ({ event, say, client }) => {
+app.event('member_joined_channel', async ({ event, say, client, body }) => {
   try {
     // Get bot user ID to compare
     const botInfo = await client.auth.test();
     const botUserId = botInfo.user_id;
+    const teamId = body.team_id || event.team;
     
     // Only trigger bootstrap if the bot itself joined the channel
     if (event.user === botUserId) {
-      console.log(`🎯 Paper bot added to channel: ${event.channel}, starting bootstrap...`);
+      console.log(`🎯 Paper bot added to channel: ${event.channel} in team ${teamId}, starting bootstrap...`);
       
       // Small delay to ensure permissions are fully set up
       setTimeout(async () => {
-        await bootstrapChannelCanvas(event.channel, say);
+        await bootstrapChannelCanvasWithClient(event.channel, client, teamId, say);
       }, 2000);
     }
   } catch (error) {
@@ -1017,9 +1248,35 @@ app.event('app_mention', async ({ event, say }) => {
       
       // Fetch recent conversation history from Slack with error handling
       console.log('Fetching conversation history for channel:', channelId);
+      
+      // Get workspace-specific client in OAuth mode
+      let client;
+      if (isOAuthMode) {
+        // Get channel info to determine team ID
+        const channelInfo = await app.client.conversations.info({ channel: channelId });
+        const teamId = channelInfo.channel?.shared_team_ids?.[0] || 'UNKNOWN';
+        
+        console.log(`🔍 Manual summary: Getting installation for team ${teamId}`);
+        const installation = await installationStore.fetchInstallation({ teamId });
+        
+        if (!installation) {
+          console.error(`❌ No installation found for team ${teamId} during manual summary`);
+          await say("📄 Hi! I need to be properly installed in this workspace. Please reinstall Paper! 🔧");
+          return;
+        }
+        
+        // Create WebClient with workspace-specific token
+        const { WebClient } = require('@slack/web-api');
+        client = new WebClient(installation.bot.token);
+        console.log(`🔍 Manual summary: Using workspace token ${installation.bot.token.substring(0, 15)}...`);
+      } else {
+        // Use global client in token mode
+        client = app.client;
+      }
+      
       let result;
       try {
-        result = await app.client.conversations.history({
+        result = await client.conversations.history({
           channel: channelId,
           limit: CONFIG.MAX_CONVERSATION_HISTORY,
           exclude_archived: true
