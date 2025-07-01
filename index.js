@@ -140,11 +140,14 @@ if (hasOAuthCreds) {
   // Add authorize function for OAuth mode
   appConfig.authorize = async (source, body) => {
     const teamId = source.teamId;
+    console.log('🔍 Authorizing request for team:', teamId);
+    
     const installation = await installationStore.fetchInstallation({
       teamId: teamId,
     });
     
     if (installation) {
+      console.log('🔍 Using bot token for API call:', installation.bot.token ? installation.bot.token.substring(0, 15) + '...' : 'MISSING');
       return {
         botToken: installation.bot.token,
         botId: installation.bot.userId,
@@ -152,6 +155,7 @@ if (hasOAuthCreds) {
       };
     }
     
+    console.log('❌ No installation found for workspace:', teamId);
     throw new Error(`No installation found for team ${teamId}`);
   };
 } else {
@@ -1310,6 +1314,14 @@ app.error((error) => {
         });
         
         console.log('✅ OAuth token exchange successful for workspace:', result.team.name, `(${result.team.id})`);
+        console.log('🔍 OAuth result structure:', {
+          access_token: result.access_token ? result.access_token.substring(0, 15) + '...' : 'MISSING',
+          token_type: result.token_type,
+          bot_user_id: result.bot_user_id,
+          scope: result.scope,
+          team: result.team,
+          authed_user: result.authed_user
+        });
         
         // Store the installation
         const installation = {
@@ -1329,6 +1341,13 @@ app.error((error) => {
           },
           installedAt: new Date().toISOString()
         };
+        
+        console.log('🔍 Installation object being stored:', {
+          teamId: installation.team.id,
+          botToken: installation.bot.token ? installation.bot.token.substring(0, 15) + '...' : 'MISSING',
+          botUserId: installation.bot.userId,
+          scopes: installation.bot.scopes
+        });
         
         await installationStore.storeInstallation(installation);
         console.log('✅ New workspace installation stored:', result.team.name, `(${result.team.id})`);
