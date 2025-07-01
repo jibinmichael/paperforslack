@@ -68,6 +68,9 @@ function validateEnvironmentVariables() {
 // Validate environment on startup
 validateEnvironmentVariables();
 
+// Track app startup time for connection stability
+global.appStartTime = Date.now();
+
 // Initialize OpenAI
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -1196,6 +1199,14 @@ async function processBatch(channelId) {
 // Handle when bot is added to a channel
 app.event('member_joined_channel', async ({ event, say, client, body }) => {
   try {
+    console.log(`👥 Member joined channel event:`, event);
+    
+    // Add connection stability check
+    if (Date.now() - global.appStartTime < 10000) {
+      console.log('🔄 Startup grace period - deferring member_joined_channel processing');
+      return;
+    }
+    
     // Get bot user ID to compare
     const botInfo = await client.auth.test();
     const botUserId = botInfo.user_id;
@@ -1217,8 +1228,17 @@ app.event('member_joined_channel', async ({ event, say, client, body }) => {
 
 // Listen to all messages
 app.message(async ({ message, say }) => {
-  // Skip bot messages and system messages
-  if (message.subtype || message.bot_id) return;
+  try {
+    // Skip bot messages and system messages
+    if (message.subtype || message.bot_id) return;
+    
+    console.log(`💬 Message event received in channel ${message.channel}`);
+    
+    // Add connection stability check - avoid immediate processing during startup
+    if (Date.now() - global.appStartTime < 10000) { // 10 second startup grace period
+      console.log('🔄 Startup grace period - deferring message processing');
+      return;
+    }
   
   const channelId = message.channel;
   
@@ -1274,11 +1294,23 @@ app.message(async ({ message, say }) => {
     // Add small delay to avoid rate limits
     setTimeout(() => processBatch(channelId), 1000);
   }
+  } catch (error) {
+    console.error('🚨 Error in message handler:', error.message);
+  }
 });
 
 // Handle app mentions for manual trigger
 app.event('app_mention', async ({ event, say }) => {
-  const channelId = event.channel;
+  try {
+    console.log(`🏷️ App mention received in channel ${event.channel}`);
+    
+    // Add connection stability check
+    if (Date.now() - global.appStartTime < 10000) {
+      console.log('🔄 Startup grace period - deferring app mention processing');
+      return;
+    }
+    
+    const channelId = event.channel;
   
   if (event.text.includes('summary') || event.text.includes('update')) {
     try {
@@ -1407,6 +1439,9 @@ app.event('app_mention', async ({ event, say }) => {
   } else {
     await say("📄 Hi! I'm *Paper* - I automatically create conversation summaries in a canvas. Mention me with 'summary' to update manually!");
   }
+  } catch (error) {
+    console.error('🚨 Error in app_mention handler:', error.message);
+  }
 });
 
 // Handle app installation
@@ -1520,13 +1555,26 @@ app.error((error) => {
   console.error('Slack app error:', error);
 });
 
-// Add Socket Mode error handling
+// Enhanced Socket Mode debugging and error handling
 app.error((error) => {
-  console.error('Slack app error:', error);
+  console.error('🚨 Slack app error detected:', {
+    message: error.message,
+    code: error.code,
+    stack: error.stack?.split('\n')[0], // First line of stack trace
+    timestamp: new Date().toISOString()
+  });
+  
   if (error.message && error.message.includes('server explicit disconnect')) {
-    console.log('🔄 Socket Mode disconnected, will attempt reconnection...');
+    console.log('🔄 Socket Mode disconnected by server, investigating...');
+    console.log('   This usually indicates:');
+    console.log('   - Event subscription mismatch between manifest and handlers');
+    console.log('   - App configuration issues in Slack admin');
+    console.log('   - Token scope problems');
+    console.log('   - Race condition in event handling setup');
   }
 });
+
+// Socket Mode debugging will be added after successful app.start()
 
 // Start the app with HTTP server for Render port binding
 (async () => {
@@ -1564,6 +1612,45 @@ app.error((error) => {
       try {
         await app.start();
         console.log(`⚡️ Paper Slack app connected via Socket Mode!`);
+        
+        // Add Socket Mode debugging after successful connection
+        if (app.receiver && app.receiver.client) {
+          console.log('🔍 Setting up Socket Mode event debugging...');
+          const socketModeClient = app.receiver.client;
+          
+          // Debug Socket Mode events
+          socketModeClient.on('slack_event', (event) => {
+            console.log('📨 Socket Mode event received:', {
+              type: event.type,
+              team_id: event.team_id,
+              api_app_id: event.api_app_id,
+              timestamp: new Date().toISOString()
+            });
+          });
+          
+          socketModeClient.on('disconnect', (event) => {
+            console.log('🔌 Socket Mode disconnected:', {
+              code: event.code,
+              reason: event.reason,
+              timestamp: new Date().toISOString()
+            });
+          });
+          
+          socketModeClient.on('ready', () => {
+            console.log('✅ Socket Mode client ready and listening for events');
+          });
+          
+          socketModeClient.on('error', (error) => {
+            console.error('🔌 Socket Mode client error:', {
+              message: error.message,
+              code: error.code,
+              timestamp: new Date().toISOString()
+            });
+          });
+          
+          console.log('✅ Socket Mode debugging listeners added');
+        }
+        
         break; // Success, exit retry loop
       } catch (startError) {
         retryCount++;
