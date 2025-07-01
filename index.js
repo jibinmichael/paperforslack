@@ -73,6 +73,36 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// Multi-workspace token storage (MUST be defined before App constructor)
+const installationStore = {
+  installations: new Map(), // teamId -> installation data
+  
+  async storeInstallation(installation) {
+    const teamId = installation.team?.id;
+    if (teamId) {
+      this.installations.set(teamId, installation);
+      console.log(`✅ Stored installation for workspace: ${teamId}`);
+    }
+  },
+  
+  async fetchInstallation(installQuery) {
+    const teamId = installQuery.teamId;
+    const installation = this.installations.get(teamId);
+    if (installation) {
+      console.log(`🔍 Found installation for workspace: ${teamId}`);
+      return installation;
+    }
+    console.log(`❌ No installation found for workspace: ${teamId}`);
+    return undefined;
+  },
+  
+  async deleteInstallation(installQuery) {
+    const teamId = installQuery.teamId;
+    this.installations.delete(teamId);
+    console.log(`🗑️ Deleted installation for workspace: ${teamId}`);
+  }
+};
+
 // Initialize Slack app with OAuth support
 const app = new App({
   signingSecret: process.env.SLACK_SIGNING_SECRET,
@@ -137,36 +167,6 @@ if (process.env.SLACK_BOT_TOKEN) {
 const channelData = new Map();
 const canvasData = new Map();
 const bootstrappedChannels = new Set(); // Track channels we've already bootstrapped
-
-// Multi-workspace token storage
-const installationStore = {
-  installations: new Map(), // teamId -> installation data
-  
-  async storeInstallation(installation) {
-    const teamId = installation.team?.id;
-    if (teamId) {
-      this.installations.set(teamId, installation);
-      console.log(`✅ Stored installation for workspace: ${teamId}`);
-    }
-  },
-  
-  async fetchInstallation(installQuery) {
-    const teamId = installQuery.teamId;
-    const installation = this.installations.get(teamId);
-    if (installation) {
-      console.log(`🔍 Found installation for workspace: ${teamId}`);
-      return installation;
-    }
-    console.log(`❌ No installation found for workspace: ${teamId}`);
-    return undefined;
-  },
-  
-  async deleteInstallation(installQuery) {
-    const teamId = installQuery.teamId;
-    this.installations.delete(teamId);
-    console.log(`🗑️ Deleted installation for workspace: ${teamId}`);
-  }
-};
 
 // Configuration - Enhanced for multi-day conversations
 const CONFIG = {
