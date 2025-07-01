@@ -17,6 +17,9 @@
     }
   },
   "oauth_config": {
+    "redirect_urls": [
+      "https://paperforslack.onrender.com/slack/oauth_redirect"
+    ],
     "scopes": {
       "bot": [
         "channels:read",
