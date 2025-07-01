@@ -71,6 +71,30 @@ validateEnvironmentVariables();
 // Track app startup time for connection stability
 global.appStartTime = Date.now();
 
+// Global error handlers to prevent crashes from Socket Mode issues
+process.on('uncaughtException', (error) => {
+  console.error('🚨 Uncaught Exception:', error.message);
+  
+  // Handle specific StateMachine errors gracefully
+  if (error.message && error.message.includes('server explicit disconnect')) {
+    console.log('🛠️ Caught StateMachine disconnect error - preventing crash');
+    console.log('💡 This indicates a Socket Mode configuration issue with Slack');
+    console.log('🔄 App will continue running on HTTP mode');
+    return; // Don't exit process
+  }
+  
+  console.error('Full error:', error);
+  // For other uncaught exceptions, still log but don't exit in production
+  if (process.env.NODE_ENV !== 'production') {
+    process.exit(1);
+  }
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('🚨 Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit process for unhandled rejections in production
+});
+
 // Initialize OpenAI
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -1403,6 +1427,13 @@ app.error((error) => {
         await app.start();
         console.log(`⚡️ Paper Slack app connected via Socket Mode!`);
         
+        // Log app configuration for debugging
+        console.log('🔍 App Configuration Debug:');
+        console.log(`   - Socket Mode: ${appConfig.socketMode}`);
+        console.log(`   - Has Bot Token: ${!!appConfig.token}`);
+        console.log(`   - Has App Token: ${!!appConfig.appToken}`);
+        console.log(`   - Has Signing Secret: ${!!appConfig.signingSecret}`);
+        
         // Add Socket Mode debugging after successful connection
         if (app.receiver && app.receiver.client) {
           console.log('🔍 Setting up Socket Mode event debugging...');
@@ -1424,6 +1455,21 @@ app.error((error) => {
               reason: event.reason,
               timestamp: new Date().toISOString()
             });
+            
+            // Handle server explicit disconnect gracefully
+            if (event.reason === 'server explicit disconnect') {
+              console.log('🚨 Server explicitly disconnected - likely configuration issue');
+              console.log('💡 This usually means:');
+              console.log('   - Event subscription mismatch in app manifest');
+              console.log('   - App token permissions issue');
+              console.log('   - Rate limiting or configuration conflict');
+              
+              // Don't crash - try to reconnect after delay
+              setTimeout(() => {
+                console.log('🔄 Attempting to reconnect after server disconnect...');
+                socketModeClient.start().catch(console.error);
+              }, 5000);
+            }
           });
           
           socketModeClient.on('ready', () => {
@@ -1436,6 +1482,12 @@ app.error((error) => {
               code: error.code,
               timestamp: new Date().toISOString()
             });
+            
+            // Handle StateMachine errors gracefully
+            if (error.message && error.message.includes('server explicit disconnect')) {
+              console.log('🛠️ Handling StateMachine disconnect error gracefully');
+              return; // Don't let it crash
+            }
           });
           
           console.log('✅ Socket Mode debugging listeners added');

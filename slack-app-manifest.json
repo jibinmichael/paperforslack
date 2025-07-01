@@ -38,15 +38,14 @@
   "settings": {
     "event_subscriptions": {
       "bot_events": [
-        "message.channels",
-        "message.groups",
+        "message",
         "app_mention",
         "app_home_opened",
         "member_joined_channel"
       ]
     },
     "interactivity": {
-      "is_enabled": true
+      "is_enabled": false
     },
     "org_deploy_enabled": true,
     "socket_mode_enabled": true,
