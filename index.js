@@ -198,55 +198,26 @@ try {
 
 // Bootstrap existing workspace installation (only needed for OAuth mode)
 if (isOAuthMode && process.env.SLACK_BOT_TOKEN) {
-  // Detect the real workspace info for the existing token
-  const detectExistingWorkspace = async () => {
-    try {
-      // Wait a bit to ensure Socket Mode is fully established
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      console.log('🔄 Starting workspace migration...');
-      const webClient = new WebClient(process.env.SLACK_BOT_TOKEN);
-      const teamInfo = await webClient.team.info();
-      const authTest = await webClient.auth.test();
-      
-      const existingInstallation = {
-        team: { 
-          id: teamInfo.team.id,
-          name: teamInfo.team.name 
-        },
-        bot: {
-          token: process.env.SLACK_BOT_TOKEN,
-          scopes: ['channels:read', 'channels:history', 'chat:write', 'chat:write.public', 'app_mentions:read', 'canvases:write', 'canvases:read', 'im:write', 'mpim:write', 'groups:read', 'groups:history', 'users:read', 'team:read'],
-          userId: authTest.user_id
-        },
-        installedAt: new Date().toISOString()
-      };
-      
-      await installationStore.storeInstallation(existingInstallation);
-      console.log('✅ Stored installation for workspace:', teamInfo.team.id);
-      console.log('🔄 Migrated existing workspace to OAuth store:', teamInfo.team.name, `(${teamInfo.team.id})`);
-    } catch (error) {
-      console.error('❌ Could not detect existing workspace info:', error.message);
-      // Fallback to placeholder installation
-      const fallbackInstallation = {
-        team: { id: 'EXISTING_WORKSPACE', name: 'Legacy Workspace' },
-        bot: {
-          token: process.env.SLACK_BOT_TOKEN,
-          scopes: ['channels:read', 'channels:history', 'chat:write', 'chat:write.public', 'app_mentions:read', 'canvases:write', 'canvases:read', 'im:write', 'mpim:write', 'groups:read', 'groups:history', 'users:read', 'team:read'],
-          userId: 'EXISTING_BOT_USER'
-        },
-        installedAt: new Date().toISOString()
-      };
-      await installationStore.storeInstallation(fallbackInstallation);
-      console.log('🔄 Migrated existing workspace with fallback data');
-    }
+  console.log('⚠️ OAuth mode detected with bot token - workspace migration temporarily disabled for debugging');
+  
+  // Store minimal installation for existing workspace without API calls
+  const quickInstallation = {
+    team: { id: 'T092S0C8HSM', name: 'timy-test-space' }, // Your known workspace
+    bot: {
+      token: process.env.SLACK_BOT_TOKEN,
+      scopes: ['channels:read', 'channels:history', 'chat:write', 'chat:write.public', 'app_mentions:read', 'canvases:write', 'canvases:read', 'im:write', 'mpim:write', 'groups:read', 'groups:history', 'users:read', 'team:read'],
+      userId: 'EXISTING_BOT_USER'
+    },
+    installedAt: new Date().toISOString()
   };
   
-  // Run detection asynchronously after a delay
-  setImmediate(() => {
-    detectExistingWorkspace().catch(error => {
-      console.error('❌ Workspace migration failed:', error);
-    });
+  setImmediate(async () => {
+    try {
+      await installationStore.storeInstallation(quickInstallation);
+      console.log('✅ Quick installation stored for workspace: T092S0C8HSM');
+    } catch (error) {
+      console.error('❌ Quick installation failed:', error);
+    }
   });
 }
 
