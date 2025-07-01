@@ -104,14 +104,20 @@ const installationStore = {
 };
 
 // Initialize Slack app with conditional OAuth support
-const hasOAuthCreds = process.env.SLACK_CLIENT_ID && process.env.SLACK_CLIENT_SECRET;
+const hasOAuthCreds = process.env.SLACK_CLIENT_ID && process.env.SLACK_CLIENT_SECRET && 
+                     process.env.SLACK_CLIENT_ID.trim() !== '' && process.env.SLACK_CLIENT_SECRET.trim() !== '';
+
+console.log('🔍 OAuth Credential Check:');
+console.log(`   SLACK_CLIENT_ID: ${process.env.SLACK_CLIENT_ID ? `${process.env.SLACK_CLIENT_ID.substring(0, 10)}...` : 'NOT SET'}`);
+console.log(`   SLACK_CLIENT_SECRET: ${process.env.SLACK_CLIENT_SECRET ? `${process.env.SLACK_CLIENT_SECRET.substring(0, 10)}...` : 'NOT SET'}`);
+console.log(`   Valid OAuth credentials: ${hasOAuthCreds}`);
 
 console.log(`🔧 App Configuration Mode: ${hasOAuthCreds ? 'Multi-Workspace OAuth' : 'Single-Workspace Token'}`);
 if (hasOAuthCreds) {
   console.log('✅ OAuth credentials detected - enabling multi-workspace support');
 } else {
-  console.log('⚠️ OAuth credentials missing - falling back to single-workspace mode');
-  console.log('   To enable multi-workspace support, add SLACK_CLIENT_ID and SLACK_CLIENT_SECRET to environment');
+  console.log('⚠️ OAuth credentials missing/invalid - falling back to single-workspace mode');
+  console.log('   To enable multi-workspace support, add valid SLACK_CLIENT_ID and SLACK_CLIENT_SECRET to environment');
 }
 
 const appConfig = {
@@ -130,15 +136,64 @@ if (hasOAuthCreds) {
     stateSecret: 'paper-oauth-state-secret-key',
     redirectUri: process.env.SLACK_OAUTH_REDIRECT_URI || 'https://paperforslack.onrender.com/slack/oauth/callback'
   };
+  
+  // Add authorize function for OAuth mode
+  appConfig.authorize = async (source, body) => {
+    const teamId = source.teamId;
+    const installation = await installationStore.fetchInstallation({
+      teamId: teamId,
+    });
+    
+    if (installation) {
+      return {
+        botToken: installation.bot.token,
+        botId: installation.bot.userId,
+        botUserId: installation.bot.userId,
+      };
+    }
+    
+    throw new Error(`No installation found for team ${teamId}`);
+  };
 } else {
   // Fall back to token-based mode for single workspace
   appConfig.token = process.env.SLACK_BOT_TOKEN;
 }
 
-const app = new App(appConfig);
+// Initialize App with automatic fallback to token mode if OAuth fails
+let app;
+let isOAuthMode = false;
+
+try {
+  console.log('🚀 Attempting to initialize Slack App...');
+  app = new App(appConfig);
+  isOAuthMode = hasOAuthCreds; // Track if we're actually in OAuth mode
+  console.log('✅ Slack App initialized successfully');
+} catch (error) {
+  if (hasOAuthCreds && error.code === 'slack_bolt_app_initialization_error') {
+    console.log('❌ OAuth initialization failed, falling back to token mode...');
+    console.log('   Error:', error.message);
+    console.log('🔄 Retrying with single-workspace token configuration...');
+    
+    // Fallback to token mode
+    const tokenConfig = {
+      token: process.env.SLACK_BOT_TOKEN,
+      signingSecret: process.env.SLACK_SIGNING_SECRET,
+      socketMode: true,
+      appToken: process.env.SLACK_APP_TOKEN,
+      port: process.env.PORT || 10000,
+    };
+    
+    app = new App(tokenConfig);
+    isOAuthMode = false; // We fell back to token mode
+    console.log('✅ Slack App initialized in token mode (single-workspace)');
+  } else {
+    console.error('❌ Failed to initialize Slack App:', error);
+    throw error; // Re-throw if it's not an OAuth issue
+  }
+}
 
 // Bootstrap existing workspace installation (only needed for OAuth mode)
-if (hasOAuthCreds && process.env.SLACK_BOT_TOKEN) {
+if (isOAuthMode && process.env.SLACK_BOT_TOKEN) {
   // Detect the real workspace info for the existing token
   const detectExistingWorkspace = async () => {
     try {
