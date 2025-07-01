@@ -103,21 +103,23 @@ const installationStore = {
   }
 };
 
-// Initialize Slack app with conditional OAuth support
-const hasOAuthCreds = process.env.SLACK_CLIENT_ID && process.env.SLACK_CLIENT_SECRET && 
-                     process.env.SLACK_CLIENT_ID.trim() !== '' && process.env.SLACK_CLIENT_SECRET.trim() !== '';
+// Initialize Slack app with conditional OAuth support - TEMPORARILY FORCE TOKEN MODE
+const hasOAuthCreds = false; // Temporarily disable OAuth to fix Socket Mode issues
+// const hasOAuthCreds = process.env.SLACK_CLIENT_ID && process.env.SLACK_CLIENT_SECRET && 
+//                     process.env.SLACK_CLIENT_ID.trim() !== '' && process.env.SLACK_CLIENT_SECRET.trim() !== '';
 
 console.log('🔍 OAuth Credential Check:');
 console.log(`   SLACK_CLIENT_ID: ${process.env.SLACK_CLIENT_ID ? `${process.env.SLACK_CLIENT_ID.substring(0, 10)}...` : 'NOT SET'}`);
 console.log(`   SLACK_CLIENT_SECRET: ${process.env.SLACK_CLIENT_SECRET ? `${process.env.SLACK_CLIENT_SECRET.substring(0, 10)}...` : 'NOT SET'}`);
 console.log(`   Valid OAuth credentials: ${hasOAuthCreds}`);
+console.log('🚨 FORCING TOKEN MODE FOR SOCKET MODE DEBUGGING');
 
 console.log(`🔧 App Configuration Mode: ${hasOAuthCreds ? 'Multi-Workspace OAuth' : 'Single-Workspace Token'}`);
 if (hasOAuthCreds) {
   console.log('✅ OAuth credentials detected - enabling multi-workspace support');
 } else {
-  console.log('⚠️ OAuth credentials missing/invalid - falling back to single-workspace mode');
-  console.log('   To enable multi-workspace support, add valid SLACK_CLIENT_ID and SLACK_CLIENT_SECRET to environment');
+  console.log('⚠️ Using single-workspace token mode for debugging');
+  console.log('   OAuth temporarily disabled to fix Socket Mode connection issues');
 }
 
 const appConfig = {
@@ -196,30 +198,8 @@ try {
   }
 }
 
-// Bootstrap existing workspace installation (only needed for OAuth mode)
-if (isOAuthMode && process.env.SLACK_BOT_TOKEN) {
-  console.log('⚠️ OAuth mode detected with bot token - workspace migration temporarily disabled for debugging');
-  
-  // Store minimal installation for existing workspace without API calls
-  const quickInstallation = {
-    team: { id: 'T092S0C8HSM', name: 'timy-test-space' }, // Your known workspace
-    bot: {
-      token: process.env.SLACK_BOT_TOKEN,
-      scopes: ['channels:read', 'channels:history', 'chat:write', 'chat:write.public', 'app_mentions:read', 'canvases:write', 'canvases:read', 'im:write', 'mpim:write', 'groups:read', 'groups:history', 'users:read', 'team:read'],
-      userId: 'EXISTING_BOT_USER'
-    },
-    installedAt: new Date().toISOString()
-  };
-  
-  setImmediate(async () => {
-    try {
-      await installationStore.storeInstallation(quickInstallation);
-      console.log('✅ Quick installation stored for workspace: T092S0C8HSM');
-    } catch (error) {
-      console.error('❌ Quick installation failed:', error);
-    }
-  });
-}
+// No workspace migration needed in token mode
+console.log('ℹ️ Token mode - no workspace migration required');
 
 // In-memory storage for message batching and canvas tracking
 const channelData = new Map();
