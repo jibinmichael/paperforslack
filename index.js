@@ -1432,13 +1432,7 @@ app.error((error) => {
           preview: process.env[key] ? process.env[key].substring(0, 10) + '...' : 'missing'
         }));
       
-      const workspaces = isOAuthMode ? 
-        Array.from(installationStore.installations.entries()).map(([teamId, installation]) => ({
-          teamId,
-          teamName: installation.team?.name || 'Unknown',
-          botToken: installation.bot?.token ? installation.bot.token.substring(0, 15) + '...' : 'missing'
-        })) : 
-        [{ teamId: 'SINGLE_WORKSPACE', teamName: 'Token Mode', botToken: 'Using environment token' }];
+      const workspaces = [{ teamId: 'SINGLE_WORKSPACE', teamName: 'Token Mode', botToken: 'Using environment token' }];
       
       res.json({
         status: 'debug',
@@ -1451,22 +1445,15 @@ app.error((error) => {
         multiWorkspace: {
           totalWorkspaces: workspaces.length,
           workspaces: workspaces,
-          isMultiTenant: isOAuthMode,
-          mode: isOAuthMode ? 'OAuth Multi-Workspace' : 'Token Single-Workspace'
+          isMultiTenant: false,
+          mode: 'Token Single-Workspace'
         }
       });
     });
     
     // Workspaces endpoint to see all installed workspaces
     httpApp.get('/workspaces', (req, res) => {
-      const workspaces = isOAuthMode ? 
-        Array.from(installationStore.installations.entries()).map(([teamId, installation]) => ({
-          teamId,
-          teamName: installation.team?.name || 'Unknown',
-          installedAt: installation.installedAt || 'Unknown',
-          scopes: installation.bot?.scopes || []
-        })) :
-        [{ teamId: 'SINGLE_WORKSPACE', teamName: 'Token Mode', installedAt: 'Environment Variable', scopes: ['Using hardcoded token'] }];
+      const workspaces = [{ teamId: 'SINGLE_WORKSPACE', teamName: 'Token Mode', installedAt: 'Environment Variable', scopes: ['Using hardcoded token'] }];
       
       res.json({
         status: 'workspaces',
@@ -1476,753 +1463,78 @@ app.error((error) => {
       });
     });
 
-    // OAuth callback endpoint - handle the redirect after Slack authorization
-    httpApp.get('/slack/oauth/callback', async (req, res) => {
-      try {
-        console.log('🔄 OAuth callback received (GET):');
-        console.log('   Query params:', req.query);
-        console.log('   URL:', req.url);
-        console.log('   Body:', req.body);
-        
-        const { code, state, error } = req.query;
-        
-        if (error) {
-          console.error('❌ OAuth error:', error);
-          return res.status(400).send(`
-            <h1>OAuth Error</h1>
-            <p>Authorization failed: ${error}</p>
-            <p><a href="/install">Try installing again</a></p>
-          `);
-        }
-        
-        console.log('🔍 Extracted GET params:', { 
-          code: code ? code.substring(0, 20) + '...' : 'MISSING', 
-          state: state || 'MISSING', 
-          error: error || 'NONE' 
-        });
-        
-        if (!code) {
-          console.error('❌ No authorization code received in GET callback');
-          console.error('   Available query keys:', Object.keys(req.query));
-          console.error('   Full query object:', req.query);
-          return res.status(400).send(`
-            <h1>OAuth Error</h1>
-            <p>No authorization code received</p>
-            <p>Query parameters: ${JSON.stringify(req.query)}</p>
-            <p><a href="/install">Try installing again</a></p>
-          `);
-        }
-        
-        // Exchange code for tokens using Slack Web API
-        console.log('🔄 Exchanging authorization code for tokens...');
-        const result = await app.client.oauth.v2.access({
-          client_id: process.env.SLACK_CLIENT_ID,
-          client_secret: process.env.SLACK_CLIENT_SECRET,
-          code: code,
-          redirect_uri: process.env.SLACK_OAUTH_REDIRECT_URI || 'https://paperforslack.onrender.com/slack/oauth/callback'
-        });
-        
-        console.log('✅ OAuth token exchange successful for workspace:', result.team.name, `(${result.team.id})`);
-        console.log('🔍 OAuth result structure:', {
-          access_token: result.access_token ? result.access_token.substring(0, 15) + '...' : 'MISSING',
-          token_type: result.token_type,
-          bot_user_id: result.bot_user_id,
-          scope: result.scope,
-          team: result.team,
-          authed_user: result.authed_user
-        });
-        
-        // Store the installation
-        const installation = {
-          team: {
-            id: result.team.id,
-            name: result.team.name
-          },
-          bot: {
-            token: result.access_token, // This is the bot token in OAuth v2
-            scopes: result.scope ? result.scope.split(',') : [],
-            userId: result.bot_user_id
-          },
-          user: {
-            token: result.authed_user?.access_token,
-            scopes: result.authed_user?.scope ? result.authed_user.scope.split(',') : [],
-            id: result.authed_user?.id
-          },
-          installedAt: new Date().toISOString()
-        };
-        
-        console.log('🔍 Installation object being stored:', {
-          teamId: installation.team.id,
-          botToken: installation.bot.token ? installation.bot.token.substring(0, 15) + '...' : 'MISSING',
-          botUserId: installation.bot.userId,
-          scopes: installation.bot.scopes
-        });
-        
-        await installationStore.storeInstallation(installation);
-        console.log('✅ New workspace installation stored:', result.team.name, `(${result.team.id})`);
-        
-        // Show success page
-        res.send(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>Paper Installed Successfully!</title>
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <style>
-                * { 
-                  margin: 0; 
-                  padding: 0; 
-                  box-sizing: border-box; 
-                }
-                
-                body { 
-                  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                  background: #f5f5f7;
-                  min-height: 100vh;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  padding: 20px;
-                  color: #1d1d1f;
-                }
-                
-                .container { 
-                  max-width: 560px;
-                  background: #ffffff;
-                  padding: 48px 40px;
-                  border-radius: 18px;
-                  text-align: center;
-                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04), 0 1px 4px rgba(0, 0, 0, 0.08);
-                  border: 1px solid rgba(0, 0, 0, 0.05);
-                }
-                
-                .success-icon { 
-                  color: #34c759; 
-                  font-size: 56px; 
-                  margin-bottom: 24px;
-                  display: block;
-                }
-                
-                .title { 
-                  color: #1d1d1f; 
-                  font-size: 26px; 
-                  font-weight: 600; 
-                  margin-bottom: 12px;
-                  letter-spacing: -0.015em;
-                }
-                
-                .subtitle { 
-                  color: #86868b; 
-                  font-size: 17px; 
-                  margin-bottom: 32px;
-                  font-weight: 400;
-                  line-height: 1.4;
-                }
-                
-                .instructions { 
-                  background: #f2f2f7; 
-                  padding: 24px; 
-                  border-radius: 16px; 
-                  margin: 32px 0; 
-                  text-align: left;
-                  border: 1px solid rgba(0, 0, 0, 0.04);
-                }
-                
-                .instructions h3 { 
-                  color: #1d1d1f;
-                  font-size: 16px;
-                  font-weight: 600;
-                  margin-bottom: 16px;
-                  display: flex;
-                  align-items: center;
-                  gap: 8px;
-                }
-                
-                .instructions ol {
-                  padding-left: 20px;
-                  margin: 0;
-                }
-                
-                .instructions li { 
-                  color: #515154;
-                  font-size: 15px;
-                  margin: 8px 0;
-                  line-height: 1.4;
-                }
-                
-                .instructions code {
-                  background: #e5e5ea;
-                  color: #1d1d1f;
-                  padding: 2px 6px;
-                  border-radius: 4px;
-                  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
-                  font-size: 13px;
-                }
-                
-                .features-section {
-                  margin: 32px 0;
-                }
-                
-                .features-title {
-                  color: #1d1d1f;
-                  font-size: 16px;
-                  font-weight: 600;
-                  margin-bottom: 16px;
-                }
-                
-                .features-list {
-                  list-style: none;
-                  padding: 0;
-                  text-align: left;
-                }
-                
-                .features-list li {
-                  color: #515154;
-                  font-size: 15px;
-                  margin: 8px 0;
-                  padding-left: 20px;
-                  position: relative;
-                  line-height: 1.4;
-                }
-                
-                .features-list li::before {
-                  content: '•';
-                  position: absolute;
-                  left: 0;
-                  color: #007aff;
-                  font-weight: 600;
-                }
-                
-                .back-btn {
-                  background: #007aff;
-                  color: #ffffff;
-                  padding: 16px 28px;
-                  border-radius: 12px;
-                  text-decoration: none;
-                  font-weight: 600;
-                  font-size: 16px;
-                  display: inline-block;
-                  transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-                  border: 1px solid #007aff;
-                  letter-spacing: -0.01em;
-                  margin-top: 8px;
-                }
-                
-                .back-btn:hover {
-                  background: #0056cc;
-                  border-color: #0056cc;
-                  transform: translateY(-1px);
-                  box-shadow: 0 8px 20px rgba(0, 122, 255, 0.2);
-                }
-                
-                .back-btn:active {
-                  transform: translateY(0);
-                  transition: all 0.1s;
-                }
-                
-                @media (max-width: 480px) {
-                  .container { 
-                    margin: 16px;
-                    padding: 32px 24px;
-                  }
-                  
-                  .title { 
-                    font-size: 22px; 
-                  }
-                  
-                  .subtitle { 
-                    font-size: 16px; 
-                  }
-                  
-                  .instructions {
-                    padding: 20px;
-                  }
-                }
-              </style>
-            </head>
-            <body>
-              <div class="container">
-                <span class="success-icon">🎉</span>
-                <h1 class="title">Paper Installed!</h1>
-                <p class="subtitle">Your AI conversation summarizer is ready to go!</p>
-                
-                <div class="instructions">
-                  <h3>
-                    <span>🚀</span>
-                    <span>Next Steps:</span>
-                  </h3>
-                  <ol>
-                    <li>Go to any Slack channel</li>
-                    <li>Add Paper to the channel: <code>/invite @Paper</code></li>
-                    <li>Have conversations (3+ messages)</li>
-                    <li>Watch Canvas summaries appear automatically!</li>
-                    <li>Try manual updates: <code>@Paper summary</code></li>
-                  </ol>
-                </div>
-                
-                <div class="features-section">
-                  <div class="features-title">✨ Features you'll love:</div>
-                  <ul class="features-list">
-                    <li>Automatic Canvas creation</li>
-                    <li>Action items with checkboxes</li>
-                    <li>Link and date extraction</li>
-                    <li>Multi-day conversation support</li>
-                  </ul>
-                </div>
-                
-                <a href="slack://open" class="back-btn">Open Slack</a>
-              </div>
-            </body>
-          </html>
-        `);
-      } catch (error) {
-        console.error('❌ Error in OAuth callback:', error);
-        res.status(500).send(`
-          <h1>OAuth Error</h1>
-          <p>Something went wrong during installation: ${error.message}</p>
-          <p><a href="/install">Try installing again</a></p>
-        `);
-      }
-    });
-
-    // Also handle POST requests to OAuth callback
-    httpApp.post('/slack/oauth/callback', async (req, res) => {
-      try {
-        console.log('🔄 OAuth callback received (POST):');
-        console.log('   Query params:', req.query);
-        console.log('   Body:', req.body);
-        console.log('   URL:', req.url);
-        
-        // Try to get parameters from both query and body
-        const params = { ...req.query, ...req.body };
-        const { code, state, error } = params;
-        
-        console.log('🔍 Extracted params:', { code: code?.substring(0, 20) + '...', state, error });
-        
-        if (error) {
-          console.error('❌ OAuth error:', error);
-          return res.status(400).send(`
-            <h1>OAuth Error</h1>
-            <p>Authorization failed: ${error}</p>
-            <p><a href="/install">Try installing again</a></p>
-          `);
-        }
-        
-        if (!code) {
-          console.error('❌ No authorization code received in POST callback');
-          return res.status(400).send(`
-            <h1>OAuth Error</h1>
-            <p>No authorization code received</p>
-            <p><a href="/install">Try installing again</a></p>
-          `);
-        }
-        
-        // Exchange code for tokens using Slack Web API
-        console.log('🔄 Exchanging authorization code for tokens (POST)...');
-        const result = await app.client.oauth.v2.access({
-          client_id: process.env.SLACK_CLIENT_ID,
-          client_secret: process.env.SLACK_CLIENT_SECRET,
-          code: code,
-          redirect_uri: process.env.SLACK_OAUTH_REDIRECT_URI || 'https://paperforslack.onrender.com/slack/oauth/callback'
-        });
-        
-        console.log('✅ OAuth token exchange successful for workspace:', result.team.name, `(${result.team.id})`);
-        
-        // Store the installation
-        const installation = {
-          team: {
-            id: result.team.id,
-            name: result.team.name
-          },
-          bot: {
-            token: result.access_token, // This is the bot token in OAuth v2
-            scopes: result.scope ? result.scope.split(',') : [],
-            userId: result.bot_user_id
-          },
-          user: {
-            token: result.authed_user?.access_token,
-            scopes: result.authed_user?.scope ? result.authed_user.scope.split(',') : [],
-            id: result.authed_user?.id
-          },
-          installedAt: new Date().toISOString()
-        };
-        
-        await installationStore.storeInstallation(installation);
-        console.log('✅ New workspace installation stored (POST):', result.team.name, `(${result.team.id})`);
-        
-        // Show success page
-        res.send(`Success! Installation completed for ${result.team.name}. You can close this window and return to Slack.`);
-      } catch (error) {
-        console.error('❌ Error in OAuth POST callback:', error);
-        res.status(500).send(`
-          <h1>OAuth Error</h1>
-          <p>Something went wrong during installation: ${error.message}</p>
-          <p><a href="/install">Try installing again</a></p>
-        `);
-      }
-    });
-
-    // OAuth is now handled automatically by Slack Bolt with proper multi-workspace support
-    
-    // Installation page for users to install the app
+    // Token mode - OAuth endpoints not needed
     httpApp.get('/install', (req, res) => {
-      try {
-        // Validate OAuth credentials
-        if (!process.env.SLACK_CLIENT_ID || !process.env.SLACK_CLIENT_SECRET) {
-          console.error('❌ Missing OAuth credentials for installation page');
-          return res.status(500).send(`
-            <!DOCTYPE html>
-            <html>
-              <head>
-                <title>Installation Error - Paper for Slack</title>
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-                <style>
-                  * { 
-                    margin: 0; 
-                    padding: 0; 
-                    box-sizing: border-box; 
-                  }
-                  
-                  body { 
-                    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                    background: #f5f5f7;
-                    min-height: 100vh;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    padding: 20px;
-                    color: #1d1d1f;
-                  }
-                  
-                  .container { 
-                    max-width: 480px;
-                    background: #ffffff;
-                    padding: 48px 40px;
-                    border-radius: 18px;
-                    text-align: center;
-                    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04), 0 1px 4px rgba(0, 0, 0, 0.08);
-                    border: 1px solid rgba(0, 0, 0, 0.05);
-                  }
-                  
-                  .error-icon {
-                    color: #ff3b30;
-                    font-size: 48px;
-                    margin-bottom: 24px;
-                    display: block;
-                  }
-                  
-                  .title { 
-                    color: #1d1d1f; 
-                    font-size: 26px; 
-                    font-weight: 600; 
-                    margin-bottom: 12px;
-                    letter-spacing: -0.015em;
-                  }
-                  
-                  .subtitle { 
-                    color: #86868b; 
-                    font-size: 17px; 
-                    margin-bottom: 24px;
-                    font-weight: 400;
-                    line-height: 1.4;
-                  }
-                  
-                  .error { 
-                    color: #ff3b30; 
-                    font-size: 15px; 
-                    background: #fff2f2;
-                    padding: 16px;
-                    border-radius: 12px;
-                    border: 1px solid rgba(255, 59, 48, 0.1);
-                    line-height: 1.4;
-                  }
-                  
-                  @media (max-width: 480px) {
-                    .container { 
-                      margin: 16px;
-                      padding: 32px 24px;
-                    }
-                    
-                    .title { 
-                      font-size: 22px; 
-                    }
-                    
-                    .subtitle { 
-                      font-size: 16px; 
-                    }
-                  }
-                </style>
-              </head>
-              <body>
-                <div class="container">
-                  <span class="error-icon">⚠️</span>
-                  <h1 class="title">Configuration Error</h1>
-                  <p class="subtitle">Paper installation is not properly configured</p>
-                  <p class="error">OAuth credentials are missing. Please contact the administrator.</p>
-                </div>
-              </body>
-            </html>
-          `);
-        }
-
-        const clientId = process.env.SLACK_CLIENT_ID.trim();
-        const redirectUri = process.env.SLACK_OAUTH_REDIRECT_URI || 'https://paperforslack.onrender.com/slack/oauth/callback';
-        
-        const installUrl = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=channels:read,channels:history,chat:write,chat:write.public,app_mentions:read,canvases:write,canvases:read,im:write,mpim:write,groups:read,groups:history,users:read,team:read&redirect_uri=${encodeURIComponent(redirectUri)}`;
-        
-        console.log(`🔍 Install page accessed - Generated OAuth URL with client ID: ${clientId.substring(0, 10)}...`);
-        
-        res.send(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>Install Paper for Slack</title>
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <style>
-                * { 
-                  margin: 0; 
-                  padding: 0; 
-                  box-sizing: border-box; 
-                }
-                
-                body { 
-                  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                  background: #f5f5f7;
-                  min-height: 100vh;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  padding: 20px;
-                  color: #1d1d1f;
-                }
-                
-                .container { 
-                  max-width: 480px;
-                  background: #ffffff;
-                  padding: 48px 40px;
-                  border-radius: 18px;
-                  text-align: center;
-                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04), 0 1px 4px rgba(0, 0, 0, 0.08);
-                  border: 1px solid rgba(0, 0, 0, 0.05);
-                }
-                
-                .logo { 
-                  font-size: 48px; 
-                  margin-bottom: 16px; 
-                  display: block;
-                }
-                
-                .title { 
-                  color: #1d1d1f; 
-                  font-size: 28px; 
-                  font-weight: 600; 
-                  margin-bottom: 12px;
-                  letter-spacing: -0.015em;
-                }
-                
-                .subtitle { 
-                  color: #86868b; 
-                  font-size: 17px; 
-                  margin-bottom: 32px;
-                  font-weight: 400;
-                  line-height: 1.4;
-                }
-                
-                .features { 
-                  text-align: left; 
-                  margin: 32px 0; 
-                  padding: 0;
-                  list-style: none;
-                }
-                
-                .features li { 
-                  color: #515154; 
-                  font-size: 15px;
-                  margin: 12px 0;
-                  padding-left: 24px;
-                  position: relative;
-                  line-height: 1.4;
-                }
-                
-                .features li::before {
-                  content: '✓';
-                  position: absolute;
-                  left: 0;
-                  color: #007aff;
-                  font-weight: 600;
-                  font-size: 14px;
-                }
-                
-                .install-btn { 
-                  background: #007aff;
-                  color: #ffffff;
-                  padding: 16px 28px;
-                  border-radius: 12px;
-                  text-decoration: none;
-                  font-weight: 600;
-                  font-size: 16px;
-                  display: inline-block;
-                  transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-                  border: 1px solid #007aff;
-                  letter-spacing: -0.01em;
-                }
-                
-                .install-btn:hover { 
-                  background: #0056cc;
-                  border-color: #0056cc;
-                  transform: translateY(-1px);
-                  box-shadow: 0 8px 20px rgba(0, 122, 255, 0.2);
-                }
-                
-                .install-btn:active {
-                  transform: translateY(0);
-                  transition: all 0.1s;
-                }
-                
-                @media (max-width: 480px) {
-                  .container { 
-                    margin: 16px;
-                    padding: 32px 24px;
-                  }
-                  
-                  .title { 
-                    font-size: 24px; 
-                  }
-                  
-                  .subtitle { 
-                    font-size: 16px; 
-                  }
-                }
-              </style>
-            </head>
-            <body>
-              <div class="container">
-                <span class="logo">📄</span>
-                <h1 class="title">Install Paper</h1>
-                <p class="subtitle">AI-powered conversation summaries for your Slack workspace</p>
-                
-                <ul class="features">
-                  <li>Automatic Canvas summaries using GPT-4</li>
-                  <li>Action items with interactive checkboxes</li>
-                  <li>Smart conversation analysis</li>
-                  <li>Multi-workspace support</li>
-                  <li>Real-time updates every 10 messages</li>
-                </ul>
-                
-                <a href="${installUrl}" class="install-btn">Add to Slack</a>
-              </div>
-            </body>
-          </html>
-        `);
-      } catch (error) {
-        console.error('❌ Error in install page:', error);
-        res.status(500).send(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>Error - Paper for Slack</title>
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <style>
-                * { 
-                  margin: 0; 
-                  padding: 0; 
-                  box-sizing: border-box; 
-                }
-                
-                body { 
-                  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-                  background: #f5f5f7;
-                  min-height: 100vh;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  padding: 20px;
-                  color: #1d1d1f;
-                }
-                
-                .container { 
-                  max-width: 480px;
-                  background: #ffffff;
-                  padding: 48px 40px;
-                  border-radius: 18px;
-                  text-align: center;
-                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04), 0 1px 4px rgba(0, 0, 0, 0.08);
-                  border: 1px solid rgba(0, 0, 0, 0.05);
-                }
-                
-                .error-icon {
-                  color: #ff3b30;
-                  font-size: 48px;
-                  margin-bottom: 24px;
-                  display: block;
-                }
-                
-                .title { 
-                  color: #1d1d1f; 
-                  font-size: 26px; 
-                  font-weight: 600; 
-                  margin-bottom: 12px;
-                  letter-spacing: -0.015em;
-                }
-                
-                .message { 
-                  color: #86868b; 
-                  font-size: 17px; 
-                  margin-bottom: 24px;
-                  font-weight: 400;
-                  line-height: 1.4;
-                }
-                
-                .error-details { 
-                  color: #8e8e93; 
-                  font-size: 13px; 
-                  background: #f2f2f7;
-                  padding: 12px;
-                  border-radius: 8px;
-                  border: 1px solid rgba(0, 0, 0, 0.04);
-                  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
-                }
-                
-                @media (max-width: 480px) {
-                  .container { 
-                    margin: 16px;
-                    padding: 32px 24px;
-                  }
-                  
-                  .title { 
-                    font-size: 22px; 
-                  }
-                  
-                  .message { 
-                    font-size: 16px; 
-                  }
-                }
-              </style>
-            </head>
-            <body>
-              <div class="container">
-                <span class="error-icon">⚠️</span>
-                <h1 class="title">Something went wrong</h1>
-                <p class="message">Unable to generate installation link. Please try again later.</p>
-                <p class="error-details">Error: ${error.message}</p>
-              </div>
-            </body>
-          </html>
-        `);
-      }
+      res.send(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <title>Paper for Slack - Token Mode</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+            <style>
+              * { 
+                margin: 0; 
+                padding: 0; 
+                box-sizing: border-box; 
+              }
+              
+              body { 
+                font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: #f5f5f7;
+                min-height: 100vh;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 20px;
+                color: #1d1d1f;
+              }
+              
+              .container { 
+                max-width: 480px;
+                background: #ffffff;
+                padding: 48px 40px;
+                border-radius: 18px;
+                text-align: center;
+                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04), 0 1px 4px rgba(0, 0, 0, 0.08);
+                border: 1px solid rgba(0, 0, 0, 0.05);
+              }
+              
+              .logo { 
+                font-size: 48px; 
+                margin-bottom: 16px; 
+                display: block;
+              }
+              
+              .title { 
+                color: #1d1d1f; 
+                font-size: 28px; 
+                font-weight: 600; 
+                margin-bottom: 12px;
+                letter-spacing: -0.015em;
+              }
+              
+              .subtitle { 
+                color: #86868b; 
+                font-size: 17px; 
+                margin-bottom: 32px;
+                font-weight: 400;
+                line-height: 1.4;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <span class="logo">📄</span>
+              <h1 class="title">Paper</h1>
+              <p class="subtitle">Running in single-workspace token mode</p>
+            </div>
+          </body>
+        </html>
+      `);
     });
     
-    // OAuth success callback to log installations (only in OAuth mode)
-    if (isOAuthMode && app.oauth) {
-      app.oauth.installationStore.storeInstallation = async (installation) => {
-        await installationStore.storeInstallation(installation);
-        console.log('✅ Paper successfully installed in workspace:', installation.team?.name, `(${installation.team?.id})`);
-      };
-    }
+    // Token mode - no OAuth installation handling needed
     
   } catch (error) {
     console.error('Failed to start app:', error);
