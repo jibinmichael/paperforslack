@@ -1268,7 +1268,60 @@ app.error((error) => {
       try {
         console.log('🔄 OAuth callback received:', req.query);
         
-        // For now, just show success page - Slack Bolt handles OAuth internally
+        const { code, state, error } = req.query;
+        
+        if (error) {
+          console.error('❌ OAuth error:', error);
+          return res.status(400).send(`
+            <h1>OAuth Error</h1>
+            <p>Authorization failed: ${error}</p>
+            <p><a href="/install">Try installing again</a></p>
+          `);
+        }
+        
+        if (!code) {
+          console.error('❌ No authorization code received');
+          return res.status(400).send(`
+            <h1>OAuth Error</h1>
+            <p>No authorization code received</p>
+            <p><a href="/install">Try installing again</a></p>
+          `);
+        }
+        
+        // Exchange code for tokens using Slack Web API
+        console.log('🔄 Exchanging authorization code for tokens...');
+        const result = await app.client.oauth.v2.access({
+          client_id: process.env.SLACK_CLIENT_ID,
+          client_secret: process.env.SLACK_CLIENT_SECRET,
+          code: code,
+          redirect_uri: process.env.SLACK_OAUTH_REDIRECT_URI || 'https://paperforslack.onrender.com/slack/oauth/callback'
+        });
+        
+        console.log('✅ OAuth token exchange successful for workspace:', result.team.name, `(${result.team.id})`);
+        
+        // Store the installation
+        const installation = {
+          team: {
+            id: result.team.id,
+            name: result.team.name
+          },
+          bot: {
+            token: result.access_token, // This is the bot token in OAuth v2
+            scopes: result.scope ? result.scope.split(',') : [],
+            userId: result.bot_user_id
+          },
+          user: {
+            token: result.authed_user?.access_token,
+            scopes: result.authed_user?.scope ? result.authed_user.scope.split(',') : [],
+            id: result.authed_user?.id
+          },
+          installedAt: new Date().toISOString()
+        };
+        
+        await installationStore.storeInstallation(installation);
+        console.log('✅ New workspace installation stored:', result.team.name, `(${result.team.id})`);
+        
+        // Show success page
         res.send(`
           <!DOCTYPE html>
           <html>
