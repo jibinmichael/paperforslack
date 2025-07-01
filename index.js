@@ -130,16 +130,49 @@ const installationStore = {
   }
 };
 
-// Simple token-only configuration (like before OAuth complexity)
-const appConfig = {
-  token: process.env.SLACK_BOT_TOKEN,
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
-  socketMode: true,
-  appToken: process.env.SLACK_APP_TOKEN,
-  port: process.env.PORT || 10000,
-};
+// Auto-detect configuration mode: OAuth (multi-workspace) vs Token (single-workspace)
+const hasOAuthEnvVars = process.env.SLACK_CLIENT_ID && process.env.SLACK_CLIENT_SECRET;
+const hasTokenEnvVars = process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOKEN;
 
-console.log('🔧 Using simple token-only configuration (back to basics)');
+let appConfig;
+let isOAuthMode = false;
+
+if (hasOAuthEnvVars) {
+  // OAuth mode for multi-workspace support
+  console.log('🌐 Using OAuth multi-workspace configuration');
+  isOAuthMode = true;
+  appConfig = {
+    signingSecret: process.env.SLACK_SIGNING_SECRET,
+    clientId: process.env.SLACK_CLIENT_ID,
+    clientSecret: process.env.SLACK_CLIENT_SECRET,
+    stateSecret: process.env.SLACK_STATE_SECRET || 'paper-canvas-state-secret',
+    scopes: ['channels:read', 'channels:history', 'chat:write', 'chat:write.public', 'app_mentions:read', 'canvases:write', 'canvases:read', 'im:write', 'mpim:write', 'groups:read', 'groups:history', 'users:read', 'team:read'],
+    installationStore: installationStore,
+    installerOptions: {
+      directInstall: true,
+      stateVerification: false  // Disable for simplicity
+    },
+    socketMode: true,
+    appToken: process.env.SLACK_APP_TOKEN,
+    port: process.env.PORT || 10000,
+  };
+} else if (hasTokenEnvVars) {
+  // Simple token mode for single workspace
+  console.log('🔧 Using simple token-only configuration (single workspace)');
+  isOAuthMode = false;
+  appConfig = {
+    token: process.env.SLACK_BOT_TOKEN,
+    signingSecret: process.env.SLACK_SIGNING_SECRET,
+    socketMode: true,
+    appToken: process.env.SLACK_APP_TOKEN,
+    port: process.env.PORT || 10000,
+  };
+} else {
+  console.error('❌ Missing required environment variables');
+  console.error('For OAuth mode: SLACK_CLIENT_ID, SLACK_CLIENT_SECRET, SLACK_SIGNING_SECRET, SLACK_APP_TOKEN');
+  console.error('For Token mode: SLACK_BOT_TOKEN, SLACK_SIGNING_SECRET, SLACK_APP_TOKEN');
+  process.exit(1);
+}
 
 // Simple app initialization (like before)
 console.log('🚀 Initializing Slack App...');
@@ -150,6 +183,32 @@ console.log('✅ Slack App initialized successfully');
 const channelData = new Map();
 const canvasData = new Map();
 const bootstrappedChannels = new Set(); // Track channels we've already bootstrapped
+
+// Helper function to get the correct Slack client for both OAuth and token modes
+async function getSlackClient(teamId = null) {
+  if (isOAuthMode && teamId) {
+    // OAuth mode: get client for specific workspace
+    try {
+      const installation = await installationStore.fetchInstallation({ teamId });
+      if (installation && installation.bot) {
+        return new (require('@slack/web-api').WebClient)(installation.bot.token);
+      }
+      console.error(`❌ No installation found for team: ${teamId}`);
+      return null;
+    } catch (error) {
+      console.error(`❌ Error getting client for team ${teamId}:`, error);
+      return null;
+    }
+  } else {
+    // Token mode: use the single app client
+    return app.client;
+  }
+}
+
+// Helper function to get team ID from event context
+function getTeamId(event) {
+  return event.team_id || event.team || null;
+}
 
 // Configuration - Enhanced for multi-day conversations
 const CONFIG = {
@@ -261,13 +320,16 @@ function shouldProcessBatch(channelId) {
 }
 
 // Get user display names and timezone info for better participant formatting
-async function getUserDisplayNames(userIds) {
+async function getUserDisplayNames(userIds, client = null) {
   const userNames = {};
   let userTimezone = 'America/New_York'; // Default timezone
   
+  // Use provided client or fall back to app.client
+  const slackClient = client || app.client;
+  
   for (const userId of [...new Set(userIds)]) {
     try {
-      const userInfo = await app.client.users.info({ user: userId });
+      const userInfo = await slackClient.users.info({ user: userId });
       userNames[userId] = userInfo.user.real_name || userInfo.user.display_name || userInfo.user.name;
       
       // Get timezone from the first user (assuming they're in the same workspace)
@@ -316,7 +378,7 @@ function selectMessagesForSummary(messages) {
 }
 
 // Generate AI summary with enhanced formatting for multi-day conversations
-async function generateSummary(messages) {
+async function generateSummary(messages, client = null) {
   try {
     // Smart selection for very long conversations to avoid token limits
     const selectedMessages = selectMessagesForSummary(messages);
@@ -326,7 +388,7 @@ async function generateSummary(messages) {
     
     // Get user display names and timezone
     const userIds = selectedMessages.map(msg => msg.user);
-    const { userNames, userTimezone } = await getUserDisplayNames(userIds);
+    const { userNames, userTimezone } = await getUserDisplayNames(userIds, client);
     
     // Extract links and dates from ALL messages (not just selected ones)
     const links = extractLinks(messages);
@@ -1065,7 +1127,46 @@ async function bootstrapChannelCanvas(channelId, say = null) {
   }
 }
 
-// Process message batch
+// Process message batch with client support for both OAuth and token modes
+async function processBatchWithClient(channelId, teamId = null) {
+  const data = channelData.get(channelId);
+  if (!data || data.messages.length === 0) return;
+
+  data.pendingUpdate = true;
+  
+  try {
+    console.log(`📝 Processing batch for channel ${channelId} with ${data.messages.length} messages`);
+    
+    const client = await getSlackClient(teamId);
+    if (!client) {
+      console.error(`❌ Could not get Slack client for team ${teamId}`);
+      return;
+    }
+    
+    const summaryData = await generateSummary(data.messages, client);
+    await updateCanvasWithClient(channelId, summaryData, client, teamId);
+    
+    data.lastBatchTime = Date.now();
+    console.log(`✅ Batch processed successfully for channel ${channelId}`);
+  } catch (error) {
+    console.error(`❌ Error processing batch for channel ${channelId}:`, error);
+    
+    // Handle specific channel access errors
+    if (error.data?.error === 'channel_not_found') {
+      console.log(`🚫 Cleaning up inaccessible channel: ${channelId}`);
+      channelData.delete(channelId);
+      canvasData.delete(channelId);
+      bootstrappedChannels.delete(channelId);
+    } else if (error.data?.error === 'missing_scope') {
+      console.log(`🚫 Missing scope for channel ${channelId}, marking as processed`);
+      bootstrappedChannels.add(channelId);
+    }
+  } finally {
+    data.pendingUpdate = false;
+  }
+}
+
+// Process message batch (legacy function for backward compatibility)
 async function processBatch(channelId) {
   const data = channelData.get(channelId);
   if (!data || data.messages.length === 0) return;
@@ -1099,7 +1200,7 @@ async function processBatch(channelId) {
 }
 
 // Handle when bot is added to a channel
-app.event('member_joined_channel', async ({ event, say, client }) => {
+app.event('member_joined_channel', async ({ event, say, client, context }) => {
   try {
     console.log(`👥 Member joined channel event:`, event);
     
@@ -1109,8 +1210,17 @@ app.event('member_joined_channel', async ({ event, say, client }) => {
       return;
     }
     
+    const teamId = getTeamId(context);
+    
+    // Get the appropriate client for this workspace
+    const workspaceClient = await getSlackClient(teamId);
+    if (!workspaceClient) {
+      console.error(`❌ Could not get client for team ${teamId}`);
+      return;
+    }
+    
     // Get bot user ID to compare
-    const botInfo = await client.auth.test();
+    const botInfo = await workspaceClient.auth.test();
     const botUserId = botInfo.user_id;
     
     // Only trigger bootstrap if the bot itself joined the channel
@@ -1119,7 +1229,7 @@ app.event('member_joined_channel', async ({ event, say, client }) => {
       
       // Small delay to ensure permissions are fully set up
       setTimeout(async () => {
-        await bootstrapChannelCanvas(event.channel, say);
+        await bootstrapChannelCanvasWithClient(event.channel, workspaceClient, teamId, say);
       }, 2000);
     }
   } catch (error) {
@@ -1128,7 +1238,7 @@ app.event('member_joined_channel', async ({ event, say, client }) => {
 });
 
 // Listen to all messages
-app.message(async ({ message, say }) => {
+app.message(async ({ message, say, context }) => {
   try {
   // Skip bot messages and system messages
   if (message.subtype || message.bot_id) return;
@@ -1142,6 +1252,7 @@ app.message(async ({ message, say }) => {
     }
   
   const channelId = message.channel;
+  const teamId = getTeamId(context);
   
   // Bootstrap check: If this is the first time we see this channel, try to bootstrap
   if (!bootstrappedChannels.has(channelId)) {
@@ -1150,7 +1261,10 @@ app.message(async ({ message, say }) => {
     // Bootstrap in background, don't block message processing
     setTimeout(async () => {
       try {
-      await bootstrapChannelCanvas(channelId);
+        const client = await getSlackClient(teamId);
+        if (client) {
+          await bootstrapChannelCanvasWithClient(channelId, client, teamId, say);
+        }
       } catch (error) {
         console.error(`❌ Error bootstrapping channel ${channelId}:`, error);
       }
@@ -1163,7 +1277,7 @@ app.message(async ({ message, say }) => {
   // Check if we should process the batch
   if (shouldProcessBatch(channelId)) {
     // Add small delay to avoid rate limits
-    setTimeout(() => processBatch(channelId), 1000);
+    setTimeout(() => processBatchWithClient(channelId, teamId), 1000);
   }
   } catch (error) {
     console.error('🚨 Error in message handler:', error.message);
@@ -1171,7 +1285,7 @@ app.message(async ({ message, say }) => {
 });
 
 // Handle app mentions for manual trigger
-app.event('app_mention', async ({ event, say }) => {
+app.event('app_mention', async ({ event, say, context }) => {
   try {
     console.log(`🏷️ App mention received in channel ${event.channel}`);
     
@@ -1182,19 +1296,26 @@ app.event('app_mention', async ({ event, say }) => {
     }
     
   const channelId = event.channel;
+  const teamId = getTeamId(context);
   
   if (event.text.includes('summary') || event.text.includes('update')) {
     try {
+      // Get the appropriate client for this workspace
+      const client = await getSlackClient(teamId);
+      if (!client) {
+        await say("❌ Sorry, I couldn't connect to your workspace. Please try again.");
+        return;
+      }
+      
       // Bootstrap check: If not bootstrapped yet, do it now
       if (!bootstrappedChannels.has(channelId)) {
         console.log(`🎯 Manual summary requested in unboostrapped channel ${channelId}, bootstrapping first...`);
-        await bootstrapChannelCanvas(channelId, say);
+        await bootstrapChannelCanvasWithClient(channelId, client, teamId, say);
         return; // Bootstrap will create the Canvas
       }
       
       // Fetch recent conversation history from Slack  
       console.log('Fetching conversation history for channel:', channelId);
-      const client = app.client;
       
       let result;
       try {
@@ -1231,8 +1352,8 @@ app.event('app_mention', async ({ event, say }) => {
         console.log(`Found ${conversationMessages.length} messages to summarize`);
         
         if (conversationMessages.length >= 3) {
-          const summaryData = await generateSummary(conversationMessages);
-          await updateCanvas(channelId, summaryData);
+          const summaryData = await generateSummary(conversationMessages, client);
+          await updateCanvasWithClient(channelId, summaryData, client, teamId);
           
           // Provide feedback for very long conversations
           if (conversationMessages.length > CONFIG.AI_TOKEN_SAFE_LIMIT) {
@@ -1510,14 +1631,23 @@ app.error((error) => {
 
     // Environment debug endpoint (for troubleshooting)
     httpApp.get('/debug', (req, res) => {
-      const envStatus = ['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET', 'SLACK_APP_TOKEN', 'OPENAI_API_KEY']
-        .map(key => ({ 
-          name: key, 
-          present: !!process.env[key],
-          preview: process.env[key] ? process.env[key].substring(0, 10) + '...' : 'missing'
-        }));
+      const envKeys = isOAuthMode ? 
+        ['SLACK_CLIENT_ID', 'SLACK_CLIENT_SECRET', 'SLACK_SIGNING_SECRET', 'SLACK_APP_TOKEN', 'OPENAI_API_KEY'] :
+        ['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET', 'SLACK_APP_TOKEN', 'OPENAI_API_KEY'];
       
-      const workspaces = [{ teamId: 'SINGLE_WORKSPACE', teamName: 'Token Mode', botToken: 'Using environment token' }];
+      const envStatus = envKeys.map(key => ({ 
+        name: key, 
+        present: !!process.env[key],
+        preview: process.env[key] ? process.env[key].substring(0, 10) + '...' : 'missing'
+      }));
+      
+      const workspaces = isOAuthMode ? 
+        Array.from(installationStore.installations.entries()).map(([teamId, installation]) => ({
+          teamId,
+          teamName: installation.team?.name || 'Unknown',
+          botToken: installation.bot?.token ? installation.bot.token.substring(0, 10) + '...' : 'Missing'
+        })) :
+        [{ teamId: 'SINGLE_WORKSPACE', teamName: 'Token Mode', botToken: 'Using environment token' }];
       
       res.json({
         status: 'debug',
@@ -1530,26 +1660,197 @@ app.error((error) => {
         multiWorkspace: {
           totalWorkspaces: workspaces.length,
           workspaces: workspaces,
-          isMultiTenant: false,
-          mode: 'Token Single-Workspace'
+          isMultiTenant: isOAuthMode,
+          mode: isOAuthMode ? 'OAuth Multi-Workspace' : 'Token Single-Workspace'
         }
       });
     });
     
     // Workspaces endpoint to see all installed workspaces
     httpApp.get('/workspaces', (req, res) => {
-      const workspaces = [{ teamId: 'SINGLE_WORKSPACE', teamName: 'Token Mode', installedAt: 'Environment Variable', scopes: ['Using hardcoded token'] }];
+      const workspaces = isOAuthMode ? 
+        Array.from(installationStore.installations.entries()).map(([teamId, installation]) => ({
+          teamId,
+          teamName: installation.team?.name || 'Unknown',
+          installedAt: installation.installedAt || 'Unknown',
+          scopes: installation.bot?.scopes || []
+        })) :
+        [{ teamId: 'SINGLE_WORKSPACE', teamName: 'Token Mode', installedAt: 'Environment Variable', scopes: ['Using hardcoded token'] }];
       
       res.json({
         status: 'workspaces',
         timestamp: new Date().toISOString(),
         totalWorkspaces: workspaces.length,
-        workspaces: workspaces
+        workspaces: workspaces,
+        mode: isOAuthMode ? 'OAuth Multi-Workspace' : 'Token Single-Workspace'
       });
     });
 
-    // Token mode - OAuth endpoints not needed
-    httpApp.get('/install', (req, res) => {
+    // OAuth installation endpoints
+    if (isOAuthMode) {
+      // OAuth mode - serve installation flow
+      httpApp.get('/install', (req, res) => {
+        res.send(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+            <title>Paper for Slack - Multi-Workspace</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+              <style>
+                * { 
+                  margin: 0; 
+                  padding: 0; 
+                  box-sizing: border-box; 
+                }
+                
+                body { 
+                font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background: #f5f5f7;
+                  min-height: 100vh;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  padding: 20px;
+                color: #1d1d1f;
+                }
+                
+                .container { 
+                max-width: 480px;
+                background: #ffffff;
+                padding: 48px 40px;
+                border-radius: 18px;
+                  text-align: center;
+                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04), 0 1px 4px rgba(0, 0, 0, 0.08);
+                border: 1px solid rgba(0, 0, 0, 0.05);
+              }
+              
+              .logo { 
+                font-size: 48px; 
+                  margin-bottom: 16px;
+                display: block;
+              }
+              
+              h1 {
+                font-size: 32px;
+                font-weight: 700;
+                margin-bottom: 16px;
+                color: #1d1d1f;
+              }
+              
+              p {
+                font-size: 18px;
+                color: #6e6e73;
+                margin-bottom: 32px;
+                line-height: 1.5;
+              }
+              
+              .install-button {
+                display: inline-block;
+                background: #4285f4;
+                color: white;
+                padding: 16px 32px;
+                border-radius: 12px;
+                text-decoration: none;
+                font-weight: 600;
+                font-size: 16px;
+                transition: all 0.2s ease;
+                border: none;
+                cursor: pointer;
+              }
+              
+              .install-button:hover {
+                background: #3367d6;
+                transform: translateY(-1px);
+              }
+              
+              .features {
+                margin-top: 40px;
+                text-align: left;
+              }
+              
+              .feature {
+                margin-bottom: 12px;
+                font-size: 16px;
+                color: #1d1d1f;
+              }
+              
+              .feature::before {
+                content: "✨";
+                margin-right: 8px;
+              }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="logo">📄</div>
+                <h1>Paper for Slack</h1>
+                <p>AI-powered Canvas conversation summarizer that creates beautiful, structured summaries of your team discussions.</p>
+                
+                <a href="/slack/install" class="install-button">
+                  Add to Slack
+                </a>
+                
+                <div class="features">
+                  <div class="feature">Automatic Canvas summaries</div>
+                  <div class="feature">Smart action item tracking</div>
+                  <div class="feature">Multi-day conversation support</div>
+                  <div class="feature">Granola-style formatting</div>
+                  <div class="feature">Real-time updates</div>
+                </div>
+              </div>
+            </body>
+          </html>
+        `);
+      });
+
+      // OAuth success page
+      httpApp.get('/slack/oauth_redirect', (req, res) => {
+        res.send(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Paper for Slack - Success!</title>
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+              <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { 
+                  font-family: 'DM Sans', sans-serif;
+                  background: #f5f5f7;
+                  min-height: 100vh;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  padding: 20px;
+                  color: #1d1d1f;
+                }
+                .container { 
+                  max-width: 480px;
+                  background: #ffffff;
+                  padding: 48px 40px;
+                  border-radius: 18px;
+                  text-align: center;
+                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+                }
+                .success { font-size: 64px; margin-bottom: 24px; }
+                h1 { font-size: 28px; font-weight: 700; margin-bottom: 16px; }
+                p { font-size: 18px; color: #6e6e73; line-height: 1.5; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="success">🎉</div>
+                <h1>Paper Installed Successfully!</h1>
+                <p>Paper is now ready to create Canvas summaries in your workspace. Add me to any channel and start having conversations!</p>
+              </div>
+            </body>
+          </html>
+        `);
+      });
+    } else {
+      // Token mode - simple info page
+      httpApp.get('/install', (req, res) => {
         res.send(`
           <!DOCTYPE html>
           <html>
@@ -1617,12 +1918,11 @@ app.error((error) => {
             </body>
           </html>
         `);
-    });
-    
-    // Token mode - no OAuth installation handling needed
+      });
+    }
     
   } catch (error) {
     console.error('Failed to start app:', error);
     process.exit(1);
   }
-})(); 
+})();
