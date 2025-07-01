@@ -1186,11 +1186,13 @@ app.error((error) => {
             client_id: process.env.SLACK_CLIENT_ID,
             client_secret: process.env.SLACK_CLIENT_SECRET,
             code: code,
-            redirect_uri: process.env.SLACK_OAUTH_REDIRECT_URI || 'https://paper-for-slack-app-fph7r.ondigitalocean.app/slack/oauth/callback'
+            redirect_uri: process.env.SLACK_OAUTH_REDIRECT_URI || 'https://paperforslack.onrender.com/slack/oauth/callback'
           });
           
           console.log('✅ OAuth tokens exchanged successfully:', result.team?.name);
           console.log('✅ Paper installed in workspace:', result.team?.id);
+          console.log('🔑 New bot token received:', result.access_token ? result.access_token.substring(0, 15) + '...' : 'none');
+          console.log('⚠️  IMPORTANT: Update SLACK_BOT_TOKEN in Render environment to:', result.access_token);
         } catch (error) {
           if (error.data?.error === 'invalid_code') {
             console.log('ℹ️ OAuth code already used (this is normal for page refreshes)');
