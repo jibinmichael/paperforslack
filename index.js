@@ -1263,6 +1263,100 @@ app.error((error) => {
       });
     });
 
+    // OAuth callback endpoint - handle the redirect after Slack authorization
+    httpApp.get('/slack/oauth/callback', async (req, res) => {
+      try {
+        console.log('🔄 OAuth callback received:', req.query);
+        
+        // For now, just show success page - Slack Bolt handles OAuth internally
+        res.send(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Paper Installed Successfully!</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+              <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { 
+                  font-family: 'Inter', sans-serif;
+                  background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+                  min-height: 100vh;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  padding: 20px;
+                }
+                .container { 
+                  max-width: 500px;
+                  background: rgba(255, 255, 255, 0.95);
+                  padding: 60px 40px;
+                  border-radius: 20px;
+                  text-align: center;
+                  box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                }
+                .title { color: #2d3748; font-size: 32px; font-weight: 700; margin-bottom: 16px; }
+                .subtitle { color: #4a5568; font-size: 18px; margin-bottom: 30px; }
+                .instructions { 
+                  background: #f7fafc; 
+                  padding: 20px; 
+                  border-radius: 12px; 
+                  margin: 20px 0; 
+                  text-align: left;
+                  color: #2d3748;
+                }
+                .instructions h3 { margin-bottom: 12px; color: #2b6cb0; }
+                .instructions li { margin: 8px 0; }
+                .back-btn {
+                  background: #4A154B;
+                  color: white;
+                  padding: 12px 24px;
+                  border-radius: 8px;
+                  text-decoration: none;
+                  font-weight: 600;
+                  display: inline-block;
+                  margin-top: 20px;
+                }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <h1 class="title">🎉 Paper Installed!</h1>
+                <p class="subtitle">Your AI conversation summarizer is ready to go!</p>
+                
+                <div class="instructions">
+                  <h3>🚀 Next Steps:</h3>
+                  <ol>
+                    <li>Go to any Slack channel</li>
+                    <li>Add Paper to the channel: <code>/invite @Paper</code></li>
+                    <li>Have conversations (3+ messages)</li>
+                    <li>Watch Canvas summaries appear automatically!</li>
+                    <li>Try manual updates: <code>@Paper summary</code></li>
+                  </ol>
+                </div>
+                
+                <p><strong>✨ Features you'll love:</strong></p>
+                <ul style="text-align: left; margin: 15px 0; color: #4a5568;">
+                  <li>📄 Automatic Canvas creation</li>
+                  <li>🎯 Action items with checkboxes</li>
+                  <li>🔗 Link and date extraction</li>
+                  <li>📊 Multi-day conversation support</li>
+                </ul>
+                
+                <a href="slack://open" class="back-btn">Open Slack</a>
+              </div>
+            </body>
+          </html>
+        `);
+      } catch (error) {
+        console.error('❌ Error in OAuth callback:', error);
+        res.status(500).send(`
+          <h1>OAuth Error</h1>
+          <p>Something went wrong during installation: ${error.message}</p>
+          <p><a href="/install">Try installing again</a></p>
+        `);
+      }
+    });
+
     // OAuth is now handled automatically by Slack Bolt with proper multi-workspace support
     
     // Installation page for users to install the app
