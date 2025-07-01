@@ -1267,58 +1267,138 @@ app.error((error) => {
     
     // Installation page for users to install the app
     httpApp.get('/install', (req, res) => {
-      const installUrl = `https://slack.com/oauth/v2/authorize?client_id=${process.env.SLACK_CLIENT_ID}&scope=channels:read,channels:history,chat:write,chat:write.public,app_mentions:read,canvases:write,canvases:read,im:write,mpim:write,groups:read,groups:history,users:read,team:read&redirect_uri=${encodeURIComponent(process.env.SLACK_OAUTH_REDIRECT_URI || 'https://paperforslack.onrender.com/slack/oauth/callback')}`;
-      
-      res.send(`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>Install Paper for Slack</title>
-            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-            <style>
-              * { margin: 0; padding: 0; box-sizing: border-box; }
-              body { 
-                font-family: 'Inter', sans-serif;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                min-height: 100vh;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: 20px;
-              }
-              .container { 
-                max-width: 500px;
-                background: rgba(255, 255, 255, 0.95);
-                padding: 60px 40px;
-                border-radius: 20px;
-                text-align: center;
-                box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-              }
-              .title { color: #2d3748; font-size: 32px; font-weight: 700; margin-bottom: 16px; }
-              .subtitle { color: #6c757d; font-size: 18px; margin-bottom: 30px; }
-              .install-btn { 
-                background: #4A154B;
-                color: white;
-                padding: 16px 32px;
-                border-radius: 12px;
-                text-decoration: none;
-                font-weight: 600;
-                font-size: 16px;
-                display: inline-block;
-                transition: all 0.3s ease;
-              }
-              .install-btn:hover { transform: translateY(-2px); }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <h1 class="title">📄 Install Paper</h1>
-              <p class="subtitle">AI-powered conversation summaries for your Slack workspace</p>
-              <a href="${installUrl}" class="install-btn">Add to Slack</a>
-            </div>
-          </body>
-        </html>
-      `);
+      try {
+        // Validate OAuth credentials
+        if (!process.env.SLACK_CLIENT_ID || !process.env.SLACK_CLIENT_SECRET) {
+          console.error('❌ Missing OAuth credentials for installation page');
+          return res.status(500).send(`
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <title>Installation Error - Paper for Slack</title>
+                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+                <style>
+                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  body { 
+                    font-family: 'Inter', sans-serif;
+                    background: linear-gradient(135deg, #ff6b6b 0%, #ff8e8e 100%);
+                    min-height: 100vh;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    padding: 20px;
+                  }
+                  .container { 
+                    max-width: 500px;
+                    background: rgba(255, 255, 255, 0.95);
+                    padding: 60px 40px;
+                    border-radius: 20px;
+                    text-align: center;
+                    box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                  }
+                  .title { color: #2d3748; font-size: 32px; font-weight: 700; margin-bottom: 16px; }
+                  .subtitle { color: #6c757d; font-size: 18px; margin-bottom: 30px; }
+                  .error { color: #dc3545; font-size: 16px; margin-top: 20px; }
+                </style>
+              </head>
+              <body>
+                <div class="container">
+                  <h1 class="title">⚠️ Configuration Error</h1>
+                  <p class="subtitle">Paper installation is not properly configured</p>
+                  <p class="error">OAuth credentials are missing. Please contact the administrator.</p>
+                </div>
+              </body>
+            </html>
+          `);
+        }
+
+        const clientId = process.env.SLACK_CLIENT_ID.trim();
+        const redirectUri = process.env.SLACK_OAUTH_REDIRECT_URI || 'https://paperforslack.onrender.com/slack/oauth/callback';
+        
+        const installUrl = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=channels:read,channels:history,chat:write,chat:write.public,app_mentions:read,canvases:write,canvases:read,im:write,mpim:write,groups:read,groups:history,users:read,team:read&redirect_uri=${encodeURIComponent(redirectUri)}`;
+        
+        console.log(`🔍 Install page accessed - Generated OAuth URL with client ID: ${clientId.substring(0, 10)}...`);
+        
+        res.send(`
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <title>Install Paper for Slack</title>
+              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+              <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body { 
+                  font-family: 'Inter', sans-serif;
+                  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                  min-height: 100vh;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  padding: 20px;
+                }
+                .container { 
+                  max-width: 500px;
+                  background: rgba(255, 255, 255, 0.95);
+                  padding: 60px 40px;
+                  border-radius: 20px;
+                  text-align: center;
+                  box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                }
+                .title { color: #2d3748; font-size: 32px; font-weight: 700; margin-bottom: 16px; }
+                .subtitle { color: #6c757d; font-size: 18px; margin-bottom: 30px; }
+                .install-btn { 
+                  background: #4A154B;
+                  color: white;
+                  padding: 16px 32px;
+                  border-radius: 12px;
+                  text-decoration: none;
+                  font-weight: 600;
+                  font-size: 16px;
+                  display: inline-block;
+                  transition: all 0.3s ease;
+                }
+                .install-btn:hover { transform: translateY(-2px); }
+                .features { 
+                  text-align: left; 
+                  margin: 30px 0; 
+                  color: #4a5568; 
+                  font-size: 14px; 
+                }
+                .features li { margin: 8px 0; }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <h1 class="title">📄 Install Paper</h1>
+                <p class="subtitle">AI-powered conversation summaries for your Slack workspace</p>
+                
+                <ul class="features">
+                  <li>✨ Automatic Canvas summaries using GPT-4</li>
+                  <li>🎯 Action items with interactive checkboxes</li>
+                  <li>📊 Smart conversation analysis</li>
+                  <li>🔄 Multi-workspace support</li>
+                  <li>⚡ Real-time updates every 10 messages</li>
+                </ul>
+                
+                <a href="${installUrl}" class="install-btn">Add to Slack</a>
+              </div>
+            </body>
+          </html>
+        `);
+      } catch (error) {
+        console.error('❌ Error in install page:', error);
+        res.status(500).send(`
+          <!DOCTYPE html>
+          <html>
+            <head><title>Error - Paper for Slack</title></head>
+            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+              <h1>⚠️ Something went wrong</h1>
+              <p>Unable to generate installation link. Please try again later.</p>
+              <p style="color: #666; font-size: 12px;">Error: ${error.message}</p>
+            </body>
+          </html>
+        `);
+      }
     });
     
     // OAuth success callback to log installations (only in OAuth mode)
