@@ -1049,11 +1049,16 @@ app.error((error) => {
         
         // Exchange code for tokens (required to complete installation)
         try {
+          const redirectUri = process.env.SLACK_OAUTH_REDIRECT_URI || 'https://paper-for-slack-app-fph7r.ondigitalocean.app/slack/oauth/callback';
+          console.log('🔍 DEBUG: Environment SLACK_OAUTH_REDIRECT_URI:', process.env.SLACK_OAUTH_REDIRECT_URI);
+          console.log('🔍 DEBUG: Using redirect_uri:', redirectUri);
+          console.log('🔍 DEBUG: All env vars:', Object.keys(process.env).filter(k => k.startsWith('SLACK')));
+          
           const result = await app.client.oauth.v2.access({
             client_id: process.env.SLACK_CLIENT_ID,
             client_secret: process.env.SLACK_CLIENT_SECRET,
             code: code,
-            redirect_uri: process.env.SLACK_OAUTH_REDIRECT_URI || 'https://paper-for-slack-app-fph7r.ondigitalocean.app/slack/oauth/callback'
+            redirect_uri: redirectUri
           });
           
           console.log('✅ OAuth tokens exchanged successfully:', result.team?.name);
