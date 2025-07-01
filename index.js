@@ -1053,7 +1053,7 @@ app.error((error) => {
             client_id: process.env.SLACK_CLIENT_ID,
             client_secret: process.env.SLACK_CLIENT_SECRET,
             code: code,
-            redirect_uri: 'https://paperforslack.onrender.com/slack/oauth/callback'
+            redirect_uri: process.env.SLACK_OAUTH_REDIRECT_URI || 'https://paper-for-slack-app-fph7r.ondigitalocean.app/slack/oauth/callback'
           });
           
           console.log('✅ OAuth tokens exchanged successfully:', result.team?.name);
