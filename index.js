@@ -138,8 +138,20 @@ const hasTokenEnvVars = process.env.SLACK_BOT_TOKEN && process.env.SLACK_APP_TOK
 let appConfig;
 let isOAuthMode = false;
 
-if (hasOAuthEnvVars) {
-  // OAuth mode for multi-workspace support
+// SMART MODE DETECTION: If we have both OAuth and Token vars, prefer Token for simplicity
+if (hasTokenEnvVars && hasOAuthEnvVars) {
+  console.log('🎯 Both OAuth and Token env vars detected - using Token mode for simplicity');
+  console.log('💡 This avoids OAuth installation complexity when you already have working tokens');
+  isOAuthMode = false;
+  appConfig = {
+    token: process.env.SLACK_BOT_TOKEN,
+    signingSecret: process.env.SLACK_SIGNING_SECRET,
+    socketMode: true,
+    appToken: process.env.SLACK_APP_TOKEN,
+    port: process.env.PORT || 10000,
+  };
+} else if (hasOAuthEnvVars && !hasTokenEnvVars) {
+  // Pure OAuth mode for multi-workspace support
   console.log('🌐 Using OAuth multi-workspace configuration');
   isOAuthMode = true;
   appConfig = {
@@ -157,7 +169,7 @@ if (hasOAuthEnvVars) {
     appToken: process.env.SLACK_APP_TOKEN,
     port: process.env.PORT || 10000,
   };
-} else if (hasTokenEnvVars) {
+} else if (hasTokenEnvVars && !hasOAuthEnvVars) {
   // Simple token mode for single workspace
   console.log('🔧 Using simple token-only configuration (single workspace)');
   isOAuthMode = false;
@@ -177,6 +189,8 @@ if (hasOAuthEnvVars) {
 
 // Simple app initialization (like before)
 console.log('🚀 Initializing Slack App...');
+console.log(`📊 Final Configuration: ${isOAuthMode ? 'OAuth Multi-Workspace' : 'Token Single-Workspace'} Mode`);
+console.log(`🔑 Using ${isOAuthMode ? 'OAuth installation store' : 'environment bot token'} for authentication`);
 const app = new App(appConfig);
 console.log('✅ Slack App initialized successfully');
 
@@ -196,6 +210,39 @@ async function getSlackClient(teamId = null) {
         console.log(`✅ Found installation for team ${teamId}, creating client`);
         return new (require('@slack/web-api').WebClient)(installation.bot.token);
       }
+      
+      // ENTERPRISE FALLBACK: If we have environment token and this team matches, use it
+      if (process.env.SLACK_BOT_TOKEN && teamId) {
+        console.log(`🔄 OAuth mode but no installation found for ${teamId}. Checking if this matches environment token...`);
+        try {
+          const fallbackClient = new (require('@slack/web-api').WebClient)(process.env.SLACK_BOT_TOKEN);
+          const authTest = await fallbackClient.auth.test();
+          if (authTest.team_id === teamId) {
+            console.log(`✅ FALLBACK: Environment token matches team ${teamId}, using it temporarily`);
+            
+            // Auto-migrate: store this as an installation
+            await installationStore.storeInstallation({
+              team: { id: teamId, name: authTest.team || 'Migrated Workspace' },
+              bot: {
+                token: process.env.SLACK_BOT_TOKEN,
+                scopes: ['channels:read', 'channels:history', 'chat:write', 'canvases:write', 'users:read'],
+                id: authTest.bot_id,
+                userId: authTest.user_id
+              },
+              user: { token: process.env.SLACK_BOT_TOKEN, id: authTest.user_id },
+              appId: authTest.app_id,
+              installedAt: new Date().toISOString(),
+              migrated: true
+            });
+            
+            console.log(`🎯 MIGRATED: Token-mode installation converted to OAuth for team ${teamId}`);
+            return fallbackClient;
+          }
+        } catch (fallbackError) {
+          console.log(`❌ Fallback token doesn't match team ${teamId}`);
+        }
+      }
+      
       console.error(`❌ No installation found for team: ${teamId}`);
       return null;
     } catch (error) {
@@ -217,6 +264,8 @@ function getTeamId(eventOrContext) {
            eventOrContext.team_id || 
            eventOrContext.team || 
            (eventOrContext.context && eventOrContext.context.teamId) ||
+           (eventOrContext.body && eventOrContext.body.team_id) ||
+           (eventOrContext.envelope && eventOrContext.envelope.team_id) ||
            null;
   }
   return null;
@@ -336,7 +385,17 @@ async function getUserDisplayNames(userIds, client = null) {
   const userNames = {};
   let userTimezone = 'America/New_York'; // Default timezone
   
-  // Use provided client or fall back to app.client
+  // In OAuth mode, we must have a team-specific client
+  if (isOAuthMode && !client) {
+    console.error('❌ OAuth mode requires authenticated client for getUserDisplayNames');
+    // Return fallback names for all users
+    for (const userId of [...new Set(userIds)]) {
+      userNames[userId] = `User ${userId.substring(0,8)}`;
+    }
+    return { userNames, userTimezone };
+  }
+  
+  // Use provided client or fall back to app.client (only in token mode)
   const slackClient = client || app.client;
   
   for (const userId of [...new Set(userIds)]) {
@@ -728,7 +787,7 @@ async function bootstrapChannelCanvasWithClient(channelId, client, teamId, say =
       if (conversationMessages.length >= CONFIG.MIN_MESSAGES_FOR_BOOTSTRAP) {
         console.log(`✅ Channel has sufficient history (${conversationMessages.length} messages), creating bootstrap Canvas`);
         
-        const summaryData = await generateSummary(conversationMessages);
+        const summaryData = await generateSummary(conversationMessages, client);
         await updateCanvasWithClient(channelId, summaryData, client, teamId);
         
         // Notify about bootstrap with helpful message
@@ -1512,6 +1571,16 @@ app.error((error) => {
     timestamp: new Date().toISOString()
   });
   
+  // Additional debugging for authorization errors
+  if (error.message && error.message.includes('Installation Store')) {
+    console.error('📊 Installation Store Debug:', {
+      isOAuthMode: isOAuthMode,
+      hasInstallations: installationStore.installations.size,
+      installedTeams: Array.from(installationStore.installations.keys()),
+      errorDetails: error.message
+    });
+  }
+  
   if (error.message && error.message.includes('server explicit disconnect')) {
     console.log('🔄 Socket Mode disconnected by server, investigating...');
     console.log('   This usually indicates:');
@@ -1529,17 +1598,29 @@ app.error((error) => {
   try {
     const port = process.env.PORT || 10000;
     
+    console.log('🚀 Starting Paper Slack App...');
+    console.log(`📡 Socket Mode: Handles real-time Slack events (main functionality)`);
+    console.log(`🌐 HTTP Server: Provides debug/status endpoints (monitoring only)`);
+    
     // Start HTTP server first for Render port detection
     const express = require('express');
     const httpApp = express();
     
+    // CORS middleware for all routes
+    httpApp.use((req, res, next) => {
+      res.header('Access-Control-Allow-Origin', '*');
+      res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+      next();
+    });
+
     // Health check endpoint
     httpApp.get('/', (req, res) => {
       res.json({ 
         status: 'healthy', 
         app: 'Paper Slack Canvas Summarizer',
-        mode: 'Socket Mode',
-        timestamp: new Date().toISOString()
+        mode: isOAuthMode ? 'OAuth Multi-Workspace' : 'Token Single-Workspace',
+        timestamp: new Date().toISOString(),
+        endpoints: ['/health', '/status', '/debug', '/workspaces', isOAuthMode ? '/install' : null].filter(Boolean)
       });
     });
     
@@ -1547,9 +1628,114 @@ app.error((error) => {
       res.json({ status: 'ok', timestamp: Date.now() });
     });
 
-    // Start HTTP server for both modes
-    httpApp.listen(port, '0.0.0.0', () => {
+    // Environment debug endpoint (for troubleshooting)
+    httpApp.get('/debug', (req, res) => {
+      const envKeys = isOAuthMode ? 
+        ['SLACK_CLIENT_ID', 'SLACK_CLIENT_SECRET', 'SLACK_SIGNING_SECRET', 'SLACK_APP_TOKEN', 'OPENAI_API_KEY'] :
+        ['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET', 'SLACK_APP_TOKEN', 'OPENAI_API_KEY'];
+      
+      const envStatus = envKeys.map(key => ({ 
+        name: key, 
+        present: !!process.env[key],
+        preview: process.env[key] ? process.env[key].substring(0, 10) + '...' : 'missing'
+      }));
+      
+      const workspaces = isOAuthMode ? 
+        Array.from(installationStore.installations.entries()).map(([teamId, installation]) => ({
+          teamId,
+          teamName: installation.team?.name || 'Unknown',
+          botToken: installation.bot?.token ? installation.bot.token.substring(0, 10) + '...' : 'Missing',
+          migrated: installation.migrated || false
+        })) :
+        [{ teamId: 'SINGLE_WORKSPACE', teamName: 'Token Mode', botToken: 'Using environment token' }];
+      
+      res.json({
+        status: 'debug',
+        timestamp: new Date().toISOString(),
+        configuration: {
+          mode: isOAuthMode ? 'OAuth Multi-Workspace' : 'Token Single-Workspace',
+          hasOAuthEnvVars: hasOAuthEnvVars,
+          hasTokenEnvVars: hasTokenEnvVars,
+          isOAuthMode: isOAuthMode
+        },
+        environment: {
+          NODE_ENV: process.env.NODE_ENV,
+          variables: envStatus,
+          dotenv_loaded: dotenvResult.parsed ? Object.keys(dotenvResult.parsed).length : 0
+        },
+        multiWorkspace: {
+          totalWorkspaces: workspaces.length,
+          workspaces: workspaces,
+          isMultiTenant: isOAuthMode,
+          installationStoreSize: isOAuthMode ? installationStore.installations.size : 'N/A'
+        }
+      });
+    });
+    
+    // Workspaces endpoint to see all installed workspaces
+    httpApp.get('/workspaces', (req, res) => {
+      const workspaces = isOAuthMode ? 
+        Array.from(installationStore.installations.entries()).map(([teamId, installation]) => ({
+          teamId,
+          teamName: installation.team?.name || 'Unknown',
+          installedAt: installation.installedAt || 'Unknown',
+          scopes: installation.bot?.scopes || [],
+          migrated: installation.migrated || false
+        })) :
+        [{ teamId: 'SINGLE_WORKSPACE', teamName: 'Token Mode', installedAt: 'Environment Variable', scopes: ['Using hardcoded token'] }];
+      
+      res.json({
+        status: 'workspaces',
+        timestamp: new Date().toISOString(),
+        totalWorkspaces: workspaces.length,
+        workspaces: workspaces,
+        mode: isOAuthMode ? 'OAuth Multi-Workspace' : 'Token Single-Workspace'
+      });
+    });
+
+    // Quick status endpoint
+    httpApp.get('/status', (req, res) => {
+      res.json({
+        app: 'Paper for Slack',
+        status: 'running',
+        mode: isOAuthMode ? 'OAuth' : 'Token',
+        installations: isOAuthMode ? installationStore.installations.size : 1,
+        teamIds: isOAuthMode ? Array.from(installationStore.installations.keys()) : ['TOKEN_MODE'],
+        timestamp: new Date().toISOString(),
+        socketMode: true,
+        healthy: true
+      });
+    });
+
+    // Start HTTP server for both modes with error handling
+    const server = httpApp.listen(port, '0.0.0.0', () => {
       console.log(`🌐 HTTP server running on port ${port} for Render!`);
+      console.log(`📍 Available endpoints:`);
+      console.log(`   - Health: https://paperforslack.onrender.com/health`);
+      console.log(`   - Status: https://paperforslack.onrender.com/status`);
+      console.log(`   - Debug: https://paperforslack.onrender.com/debug`);
+      console.log(`   - Workspaces: https://paperforslack.onrender.com/workspaces`);
+      if (isOAuthMode) {
+        console.log(`   - Install: https://paperforslack.onrender.com/install`);
+        console.log(`   - OAuth: https://paperforslack.onrender.com/slack/install`);
+      }
+    });
+    
+    server.on('error', (error) => {
+      if (error.code === 'EADDRINUSE') {
+        console.log(`⚠️ Port ${port} is busy, trying next port...`);
+        const nextPort = parseInt(port) + Math.floor(Math.random() * 100) + 1;
+        console.log(`🔄 Retrying on port ${nextPort}`);
+        httpApp.listen(nextPort, '0.0.0.0', () => {
+          console.log(`🌐 HTTP server running on port ${nextPort} (fallback)!`);
+          console.log(`📍 Debug endpoints now at:`);
+          console.log(`   - http://localhost:${nextPort}/status`);
+          console.log(`   - http://localhost:${nextPort}/debug`);
+          console.log(`   - http://localhost:${nextPort}/health`);
+        });
+      } else {
+        console.error('❌ HTTP server error:', error);
+      }
     });
     
     // Start Slack app in Socket Mode with retry logic
@@ -1563,24 +1749,45 @@ app.error((error) => {
         
         // Log app configuration for debugging
         console.log('🔍 App Configuration Debug:');
+        console.log(`   - Mode: ${isOAuthMode ? 'OAuth Multi-Workspace' : 'Token Single-Workspace'}`);
         console.log(`   - Socket Mode: ${appConfig.socketMode}`);
         console.log(`   - Has Bot Token: ${!!appConfig.token}`);
+        console.log(`   - Has Client ID: ${!!appConfig.clientId}`);
         console.log(`   - Has App Token: ${!!appConfig.appToken}`);
         console.log(`   - Has Signing Secret: ${!!appConfig.signingSecret}`);
+        console.log(`   - Installation Store: ${isOAuthMode ? 'Enabled' : 'Disabled'}`);
+        console.log(`   - Current Installations: ${isOAuthMode ? installationStore.installations.size : 'N/A (Token Mode)'}`);
         
         // Add Socket Mode debugging after successful connection
         if (app.receiver && app.receiver.client) {
           console.log('🔍 Setting up Socket Mode event debugging...');
           const socketModeClient = app.receiver.client;
           
-          // Debug Socket Mode events
+          // Debug Socket Mode events with enhanced logging
           socketModeClient.on('slack_event', (event) => {
             console.log('📨 Socket Mode event received:', {
               type: event.type,
               team_id: event.team_id,
               api_app_id: event.api_app_id,
-              timestamp: new Date().toISOString()
+              timestamp: new Date().toISOString(),
+              // Enhanced debugging for missing team_id
+              event_team_info: {
+                event_team_id: event.team_id,
+                envelope_team_id: event.envelope?.team_id,
+                body_team_id: event.body?.team_id,
+                payload_team_id: event.payload?.team_id
+              }
             });
+            
+            // Log authorization context
+            if (!event.team_id && isOAuthMode) {
+              console.error('🚨 CRITICAL: OAuth mode but no team_id in event!', {
+                isOAuthMode: isOAuthMode,
+                eventKeys: Object.keys(event),
+                hasInstallations: installationStore.installations.size > 0,
+                installedTeams: Array.from(installationStore.installations.keys())
+              });
+            }
           });
           
           socketModeClient.on('disconnect', (event) => {
@@ -1642,62 +1849,7 @@ app.error((error) => {
       }
     }
 
-    // Environment debug endpoint (for troubleshooting)
-    httpApp.get('/debug', (req, res) => {
-      const envKeys = isOAuthMode ? 
-        ['SLACK_CLIENT_ID', 'SLACK_CLIENT_SECRET', 'SLACK_SIGNING_SECRET', 'SLACK_APP_TOKEN', 'OPENAI_API_KEY'] :
-        ['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET', 'SLACK_APP_TOKEN', 'OPENAI_API_KEY'];
-      
-      const envStatus = envKeys.map(key => ({ 
-        name: key, 
-        present: !!process.env[key],
-        preview: process.env[key] ? process.env[key].substring(0, 10) + '...' : 'missing'
-      }));
-      
-      const workspaces = isOAuthMode ? 
-        Array.from(installationStore.installations.entries()).map(([teamId, installation]) => ({
-          teamId,
-          teamName: installation.team?.name || 'Unknown',
-          botToken: installation.bot?.token ? installation.bot.token.substring(0, 10) + '...' : 'Missing'
-        })) :
-        [{ teamId: 'SINGLE_WORKSPACE', teamName: 'Token Mode', botToken: 'Using environment token' }];
-      
-      res.json({
-        status: 'debug',
-        timestamp: new Date().toISOString(),
-        environment: {
-          NODE_ENV: process.env.NODE_ENV,
-          variables: envStatus,
-          dotenv_loaded: dotenvResult.parsed ? Object.keys(dotenvResult.parsed).length : 0
-        },
-        multiWorkspace: {
-          totalWorkspaces: workspaces.length,
-          workspaces: workspaces,
-          isMultiTenant: isOAuthMode,
-          mode: isOAuthMode ? 'OAuth Multi-Workspace' : 'Token Single-Workspace'
-        }
-      });
-    });
-    
-    // Workspaces endpoint to see all installed workspaces
-    httpApp.get('/workspaces', (req, res) => {
-      const workspaces = isOAuthMode ? 
-        Array.from(installationStore.installations.entries()).map(([teamId, installation]) => ({
-          teamId,
-          teamName: installation.team?.name || 'Unknown',
-          installedAt: installation.installedAt || 'Unknown',
-          scopes: installation.bot?.scopes || []
-        })) :
-        [{ teamId: 'SINGLE_WORKSPACE', teamName: 'Token Mode', installedAt: 'Environment Variable', scopes: ['Using hardcoded token'] }];
-      
-      res.json({
-        status: 'workspaces',
-        timestamp: new Date().toISOString(),
-        totalWorkspaces: workspaces.length,
-        workspaces: workspaces,
-        mode: isOAuthMode ? 'OAuth Multi-Workspace' : 'Token Single-Workspace'
-      });
-    });
+
 
     // OAuth installation endpoints
     if (isOAuthMode) {
