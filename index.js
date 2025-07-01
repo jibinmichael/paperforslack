@@ -125,47 +125,55 @@ if (hasOAuthCreds) {
   console.log('   OAuth temporarily disabled to fix Socket Mode connection issues');
 }
 
-const appConfig = {
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
-  socketMode: true,
-  appToken: process.env.SLACK_APP_TOKEN,
-  port: process.env.PORT || 10000,
-};
+// Build app configuration based on mode
+let appConfig;
 
-// Add OAuth configuration only if credentials are available
 if (hasOAuthCreds) {
-  appConfig.installationStore = installationStore;
-  appConfig.oauth = {
-    clientId: process.env.SLACK_CLIENT_ID,
-    clientSecret: process.env.SLACK_CLIENT_SECRET,
-    stateSecret: 'paper-oauth-state-secret-key',
-    redirectUri: process.env.SLACK_OAUTH_REDIRECT_URI || 'https://paperforslack.onrender.com/slack/oauth/callback'
-  };
-  
-  // Add authorize function for OAuth mode
-  appConfig.authorize = async (source, body) => {
-    const teamId = source.teamId;
-    console.log('🔍 Authorizing request for team:', teamId);
-    
-    const installation = await installationStore.fetchInstallation({
-      teamId: teamId,
-    });
-    
-    if (installation) {
-      console.log('🔍 Using bot token for API call:', installation.bot.token ? installation.bot.token.substring(0, 15) + '...' : 'MISSING');
-      return {
-        botToken: installation.bot.token,
-        botId: installation.bot.userId,
-        botUserId: installation.bot.userId,
-      };
+  // OAuth mode configuration
+  appConfig = {
+    signingSecret: process.env.SLACK_SIGNING_SECRET,
+    socketMode: true,
+    appToken: process.env.SLACK_APP_TOKEN,
+    port: process.env.PORT || 10000,
+    installationStore: installationStore,
+    oauth: {
+      clientId: process.env.SLACK_CLIENT_ID,
+      clientSecret: process.env.SLACK_CLIENT_SECRET,
+      stateSecret: 'paper-oauth-state-secret-key',
+      redirectUri: process.env.SLACK_OAUTH_REDIRECT_URI || 'https://paperforslack.onrender.com/slack/oauth/callback'
+    },
+    // Add authorize function for OAuth mode
+    authorize: async (source, body) => {
+      const teamId = source.teamId;
+      console.log('🔍 Authorizing request for team:', teamId);
+      
+      const installation = await installationStore.fetchInstallation({
+        teamId: teamId,
+      });
+      
+      if (installation) {
+        console.log('🔍 Using bot token for API call:', installation.bot.token ? installation.bot.token.substring(0, 15) + '...' : 'MISSING');
+        return {
+          botToken: installation.bot.token,
+          botId: installation.bot.userId,
+          botUserId: installation.bot.userId,
+        };
+      }
+      
+      console.log('❌ No installation found for workspace:', teamId);
+      throw new Error(`No installation found for team ${teamId}`);
     }
-    
-    console.log('❌ No installation found for workspace:', teamId);
-    throw new Error(`No installation found for team ${teamId}`);
   };
 } else {
-  // Fall back to token-based mode for single workspace
-  appConfig.token = process.env.SLACK_BOT_TOKEN;
+  // Pure token mode configuration (no OAuth at all)
+  appConfig = {
+    token: process.env.SLACK_BOT_TOKEN,
+    signingSecret: process.env.SLACK_SIGNING_SECRET,
+    socketMode: true,
+    appToken: process.env.SLACK_APP_TOKEN,
+    port: process.env.PORT || 10000,
+  };
+  console.log('🔧 Token mode: Using pure token configuration (no OAuth components)');
 }
 
 // Initialize App with automatic fallback to token mode if OAuth fails
@@ -1378,7 +1386,8 @@ app.event('app_mention', async ({ event, say }) => {
         client = new WebClient(installation.bot.token);
         console.log(`🔍 Manual summary: Using workspace token ${installation.bot.token.substring(0, 15)}...`);
       } else {
-        // Use global client in token mode
+        // Use global client in token mode (bypass OAuth authorization)
+        console.log(`🔍 Manual summary: Using token mode with environment bot token`);
         client = app.client;
       }
       
