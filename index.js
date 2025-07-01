@@ -1615,57 +1615,191 @@ app.error((error) => {
           <html>
             <head>
               <title>Paper Installed Successfully!</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
               <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
+                * { 
+                  margin: 0; 
+                  padding: 0; 
+                  box-sizing: border-box; 
+                }
+                
                 body { 
-                  font-family: 'Inter', sans-serif;
-                  background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+                  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                  background: #f5f5f7;
                   min-height: 100vh;
                   display: flex;
                   align-items: center;
                   justify-content: center;
                   padding: 20px;
+                  color: #1d1d1f;
                 }
+                
                 .container { 
-                  max-width: 500px;
-                  background: rgba(255, 255, 255, 0.95);
-                  padding: 60px 40px;
-                  border-radius: 20px;
+                  max-width: 560px;
+                  background: #ffffff;
+                  padding: 48px 40px;
+                  border-radius: 18px;
                   text-align: center;
-                  box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04), 0 1px 4px rgba(0, 0, 0, 0.08);
+                  border: 1px solid rgba(0, 0, 0, 0.05);
                 }
-                .title { color: #2d3748; font-size: 32px; font-weight: 700; margin-bottom: 16px; }
-                .subtitle { color: #4a5568; font-size: 18px; margin-bottom: 30px; }
+                
+                .success-icon { 
+                  color: #34c759; 
+                  font-size: 56px; 
+                  margin-bottom: 24px;
+                  display: block;
+                }
+                
+                .title { 
+                  color: #1d1d1f; 
+                  font-size: 26px; 
+                  font-weight: 600; 
+                  margin-bottom: 12px;
+                  letter-spacing: -0.015em;
+                }
+                
+                .subtitle { 
+                  color: #86868b; 
+                  font-size: 17px; 
+                  margin-bottom: 32px;
+                  font-weight: 400;
+                  line-height: 1.4;
+                }
+                
                 .instructions { 
-                  background: #f7fafc; 
-                  padding: 20px; 
-                  border-radius: 12px; 
-                  margin: 20px 0; 
+                  background: #f2f2f7; 
+                  padding: 24px; 
+                  border-radius: 16px; 
+                  margin: 32px 0; 
                   text-align: left;
-                  color: #2d3748;
+                  border: 1px solid rgba(0, 0, 0, 0.04);
                 }
-                .instructions h3 { margin-bottom: 12px; color: #2b6cb0; }
-                .instructions li { margin: 8px 0; }
+                
+                .instructions h3 { 
+                  color: #1d1d1f;
+                  font-size: 16px;
+                  font-weight: 600;
+                  margin-bottom: 16px;
+                  display: flex;
+                  align-items: center;
+                  gap: 8px;
+                }
+                
+                .instructions ol {
+                  padding-left: 20px;
+                  margin: 0;
+                }
+                
+                .instructions li { 
+                  color: #515154;
+                  font-size: 15px;
+                  margin: 8px 0;
+                  line-height: 1.4;
+                }
+                
+                .instructions code {
+                  background: #e5e5ea;
+                  color: #1d1d1f;
+                  padding: 2px 6px;
+                  border-radius: 4px;
+                  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+                  font-size: 13px;
+                }
+                
+                .features-section {
+                  margin: 32px 0;
+                }
+                
+                .features-title {
+                  color: #1d1d1f;
+                  font-size: 16px;
+                  font-weight: 600;
+                  margin-bottom: 16px;
+                }
+                
+                .features-list {
+                  list-style: none;
+                  padding: 0;
+                  text-align: left;
+                }
+                
+                .features-list li {
+                  color: #515154;
+                  font-size: 15px;
+                  margin: 8px 0;
+                  padding-left: 20px;
+                  position: relative;
+                  line-height: 1.4;
+                }
+                
+                .features-list li::before {
+                  content: '•';
+                  position: absolute;
+                  left: 0;
+                  color: #007aff;
+                  font-weight: 600;
+                }
+                
                 .back-btn {
-                  background: #4A154B;
-                  color: white;
-                  padding: 12px 24px;
-                  border-radius: 8px;
+                  background: #007aff;
+                  color: #ffffff;
+                  padding: 16px 28px;
+                  border-radius: 12px;
                   text-decoration: none;
                   font-weight: 600;
+                  font-size: 16px;
                   display: inline-block;
-                  margin-top: 20px;
+                  transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                  border: 1px solid #007aff;
+                  letter-spacing: -0.01em;
+                  margin-top: 8px;
+                }
+                
+                .back-btn:hover {
+                  background: #0056cc;
+                  border-color: #0056cc;
+                  transform: translateY(-1px);
+                  box-shadow: 0 8px 20px rgba(0, 122, 255, 0.2);
+                }
+                
+                .back-btn:active {
+                  transform: translateY(0);
+                  transition: all 0.1s;
+                }
+                
+                @media (max-width: 480px) {
+                  .container { 
+                    margin: 16px;
+                    padding: 32px 24px;
+                  }
+                  
+                  .title { 
+                    font-size: 22px; 
+                  }
+                  
+                  .subtitle { 
+                    font-size: 16px; 
+                  }
+                  
+                  .instructions {
+                    padding: 20px;
+                  }
                 }
               </style>
             </head>
             <body>
               <div class="container">
-                <h1 class="title">🎉 Paper Installed!</h1>
+                <span class="success-icon">🎉</span>
+                <h1 class="title">Paper Installed!</h1>
                 <p class="subtitle">Your AI conversation summarizer is ready to go!</p>
                 
                 <div class="instructions">
-                  <h3>🚀 Next Steps:</h3>
+                  <h3>
+                    <span>🚀</span>
+                    <span>Next Steps:</span>
+                  </h3>
                   <ol>
                     <li>Go to any Slack channel</li>
                     <li>Add Paper to the channel: <code>/invite @Paper</code></li>
@@ -1675,13 +1809,15 @@ app.error((error) => {
                   </ol>
                 </div>
                 
-                <p><strong>✨ Features you'll love:</strong></p>
-                <ul style="text-align: left; margin: 15px 0; color: #4a5568;">
-                  <li>📄 Automatic Canvas creation</li>
-                  <li>🎯 Action items with checkboxes</li>
-                  <li>🔗 Link and date extraction</li>
-                  <li>📊 Multi-day conversation support</li>
-                </ul>
+                <div class="features-section">
+                  <div class="features-title">✨ Features you'll love:</div>
+                  <ul class="features-list">
+                    <li>Automatic Canvas creation</li>
+                    <li>Action items with checkboxes</li>
+                    <li>Link and date extraction</li>
+                    <li>Multi-day conversation support</li>
+                  </ul>
+                </div>
                 
                 <a href="slack://open" class="back-btn">Open Slack</a>
               </div>
@@ -1788,34 +1924,89 @@ app.error((error) => {
             <html>
               <head>
                 <title>Installation Error - Paper for Slack</title>
-                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
                 <style>
-                  * { margin: 0; padding: 0; box-sizing: border-box; }
+                  * { 
+                    margin: 0; 
+                    padding: 0; 
+                    box-sizing: border-box; 
+                  }
+                  
                   body { 
-                    font-family: 'Inter', sans-serif;
-                    background: linear-gradient(135deg, #ff6b6b 0%, #ff8e8e 100%);
+                    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    background: #f5f5f7;
                     min-height: 100vh;
                     display: flex;
                     align-items: center;
                     justify-content: center;
                     padding: 20px;
+                    color: #1d1d1f;
                   }
+                  
                   .container { 
-                    max-width: 500px;
-                    background: rgba(255, 255, 255, 0.95);
-                    padding: 60px 40px;
-                    border-radius: 20px;
+                    max-width: 480px;
+                    background: #ffffff;
+                    padding: 48px 40px;
+                    border-radius: 18px;
                     text-align: center;
-                    box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04), 0 1px 4px rgba(0, 0, 0, 0.08);
+                    border: 1px solid rgba(0, 0, 0, 0.05);
                   }
-                  .title { color: #2d3748; font-size: 32px; font-weight: 700; margin-bottom: 16px; }
-                  .subtitle { color: #6c757d; font-size: 18px; margin-bottom: 30px; }
-                  .error { color: #dc3545; font-size: 16px; margin-top: 20px; }
+                  
+                  .error-icon {
+                    color: #ff3b30;
+                    font-size: 48px;
+                    margin-bottom: 24px;
+                    display: block;
+                  }
+                  
+                  .title { 
+                    color: #1d1d1f; 
+                    font-size: 26px; 
+                    font-weight: 600; 
+                    margin-bottom: 12px;
+                    letter-spacing: -0.015em;
+                  }
+                  
+                  .subtitle { 
+                    color: #86868b; 
+                    font-size: 17px; 
+                    margin-bottom: 24px;
+                    font-weight: 400;
+                    line-height: 1.4;
+                  }
+                  
+                  .error { 
+                    color: #ff3b30; 
+                    font-size: 15px; 
+                    background: #fff2f2;
+                    padding: 16px;
+                    border-radius: 12px;
+                    border: 1px solid rgba(255, 59, 48, 0.1);
+                    line-height: 1.4;
+                  }
+                  
+                  @media (max-width: 480px) {
+                    .container { 
+                      margin: 16px;
+                      padding: 32px 24px;
+                    }
+                    
+                    .title { 
+                      font-size: 22px; 
+                    }
+                    
+                    .subtitle { 
+                      font-size: 16px; 
+                    }
+                  }
                 </style>
               </head>
               <body>
                 <div class="container">
-                  <h1 class="title">⚠️ Configuration Error</h1>
+                  <span class="error-icon">⚠️</span>
+                  <h1 class="title">Configuration Error</h1>
                   <p class="subtitle">Paper installation is not properly configured</p>
                   <p class="error">OAuth credentials are missing. Please contact the administrator.</p>
                 </div>
@@ -1836,60 +2027,137 @@ app.error((error) => {
           <html>
             <head>
               <title>Install Paper for Slack</title>
-              <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
               <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
+                * { 
+                  margin: 0; 
+                  padding: 0; 
+                  box-sizing: border-box; 
+                }
+                
                 body { 
-                  font-family: 'Inter', sans-serif;
-                  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                  background: #f5f5f7;
                   min-height: 100vh;
                   display: flex;
                   align-items: center;
                   justify-content: center;
                   padding: 20px;
+                  color: #1d1d1f;
                 }
+                
                 .container { 
-                  max-width: 500px;
-                  background: rgba(255, 255, 255, 0.95);
-                  padding: 60px 40px;
-                  border-radius: 20px;
+                  max-width: 480px;
+                  background: #ffffff;
+                  padding: 48px 40px;
+                  border-radius: 18px;
                   text-align: center;
-                  box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04), 0 1px 4px rgba(0, 0, 0, 0.08);
+                  border: 1px solid rgba(0, 0, 0, 0.05);
                 }
-                .title { color: #2d3748; font-size: 32px; font-weight: 700; margin-bottom: 16px; }
-                .subtitle { color: #6c757d; font-size: 18px; margin-bottom: 30px; }
+                
+                .logo { 
+                  font-size: 48px; 
+                  margin-bottom: 16px; 
+                  display: block;
+                }
+                
+                .title { 
+                  color: #1d1d1f; 
+                  font-size: 28px; 
+                  font-weight: 600; 
+                  margin-bottom: 12px;
+                  letter-spacing: -0.015em;
+                }
+                
+                .subtitle { 
+                  color: #86868b; 
+                  font-size: 17px; 
+                  margin-bottom: 32px;
+                  font-weight: 400;
+                  line-height: 1.4;
+                }
+                
+                .features { 
+                  text-align: left; 
+                  margin: 32px 0; 
+                  padding: 0;
+                  list-style: none;
+                }
+                
+                .features li { 
+                  color: #515154; 
+                  font-size: 15px;
+                  margin: 12px 0;
+                  padding-left: 24px;
+                  position: relative;
+                  line-height: 1.4;
+                }
+                
+                .features li::before {
+                  content: '✓';
+                  position: absolute;
+                  left: 0;
+                  color: #007aff;
+                  font-weight: 600;
+                  font-size: 14px;
+                }
+                
                 .install-btn { 
-                  background: #4A154B;
-                  color: white;
-                  padding: 16px 32px;
+                  background: #007aff;
+                  color: #ffffff;
+                  padding: 16px 28px;
                   border-radius: 12px;
                   text-decoration: none;
                   font-weight: 600;
                   font-size: 16px;
                   display: inline-block;
-                  transition: all 0.3s ease;
+                  transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+                  border: 1px solid #007aff;
+                  letter-spacing: -0.01em;
                 }
-                .install-btn:hover { transform: translateY(-2px); }
-                .features { 
-                  text-align: left; 
-                  margin: 30px 0; 
-                  color: #4a5568; 
-                  font-size: 14px; 
+                
+                .install-btn:hover { 
+                  background: #0056cc;
+                  border-color: #0056cc;
+                  transform: translateY(-1px);
+                  box-shadow: 0 8px 20px rgba(0, 122, 255, 0.2);
                 }
-                .features li { margin: 8px 0; }
+                
+                .install-btn:active {
+                  transform: translateY(0);
+                  transition: all 0.1s;
+                }
+                
+                @media (max-width: 480px) {
+                  .container { 
+                    margin: 16px;
+                    padding: 32px 24px;
+                  }
+                  
+                  .title { 
+                    font-size: 24px; 
+                  }
+                  
+                  .subtitle { 
+                    font-size: 16px; 
+                  }
+                }
               </style>
             </head>
             <body>
               <div class="container">
-                <h1 class="title">📄 Install Paper</h1>
+                <span class="logo">📄</span>
+                <h1 class="title">Install Paper</h1>
                 <p class="subtitle">AI-powered conversation summaries for your Slack workspace</p>
                 
                 <ul class="features">
-                  <li>✨ Automatic Canvas summaries using GPT-4</li>
-                  <li>🎯 Action items with interactive checkboxes</li>
-                  <li>📊 Smart conversation analysis</li>
-                  <li>🔄 Multi-workspace support</li>
-                  <li>⚡ Real-time updates every 10 messages</li>
+                  <li>Automatic Canvas summaries using GPT-4</li>
+                  <li>Action items with interactive checkboxes</li>
+                  <li>Smart conversation analysis</li>
+                  <li>Multi-workspace support</li>
+                  <li>Real-time updates every 10 messages</li>
                 </ul>
                 
                 <a href="${installUrl}" class="install-btn">Add to Slack</a>
@@ -1902,11 +2170,94 @@ app.error((error) => {
         res.status(500).send(`
           <!DOCTYPE html>
           <html>
-            <head><title>Error - Paper for Slack</title></head>
-            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-              <h1>⚠️ Something went wrong</h1>
-              <p>Unable to generate installation link. Please try again later.</p>
-              <p style="color: #666; font-size: 12px;">Error: ${error.message}</p>
+            <head>
+              <title>Error - Paper for Slack</title>
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+              <style>
+                * { 
+                  margin: 0; 
+                  padding: 0; 
+                  box-sizing: border-box; 
+                }
+                
+                body { 
+                  font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                  background: #f5f5f7;
+                  min-height: 100vh;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  padding: 20px;
+                  color: #1d1d1f;
+                }
+                
+                .container { 
+                  max-width: 480px;
+                  background: #ffffff;
+                  padding: 48px 40px;
+                  border-radius: 18px;
+                  text-align: center;
+                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04), 0 1px 4px rgba(0, 0, 0, 0.08);
+                  border: 1px solid rgba(0, 0, 0, 0.05);
+                }
+                
+                .error-icon {
+                  color: #ff3b30;
+                  font-size: 48px;
+                  margin-bottom: 24px;
+                  display: block;
+                }
+                
+                .title { 
+                  color: #1d1d1f; 
+                  font-size: 26px; 
+                  font-weight: 600; 
+                  margin-bottom: 12px;
+                  letter-spacing: -0.015em;
+                }
+                
+                .message { 
+                  color: #86868b; 
+                  font-size: 17px; 
+                  margin-bottom: 24px;
+                  font-weight: 400;
+                  line-height: 1.4;
+                }
+                
+                .error-details { 
+                  color: #8e8e93; 
+                  font-size: 13px; 
+                  background: #f2f2f7;
+                  padding: 12px;
+                  border-radius: 8px;
+                  border: 1px solid rgba(0, 0, 0, 0.04);
+                  font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', monospace;
+                }
+                
+                @media (max-width: 480px) {
+                  .container { 
+                    margin: 16px;
+                    padding: 32px 24px;
+                  }
+                  
+                  .title { 
+                    font-size: 22px; 
+                  }
+                  
+                  .message { 
+                    font-size: 16px; 
+                  }
+                }
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <span class="error-icon">⚠️</span>
+                <h1 class="title">Something went wrong</h1>
+                <p class="message">Unable to generate installation link. Please try again later.</p>
+                <p class="error-details">Error: ${error.message}</p>
+              </div>
             </body>
           </html>
         `);
