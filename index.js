@@ -201,6 +201,10 @@ if (isOAuthMode && process.env.SLACK_BOT_TOKEN) {
   // Detect the real workspace info for the existing token
   const detectExistingWorkspace = async () => {
     try {
+      // Wait a bit to ensure Socket Mode is fully established
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      console.log('🔄 Starting workspace migration...');
       const webClient = new WebClient(process.env.SLACK_BOT_TOKEN);
       const teamInfo = await webClient.team.info();
       const authTest = await webClient.auth.test();
@@ -219,6 +223,7 @@ if (isOAuthMode && process.env.SLACK_BOT_TOKEN) {
       };
       
       await installationStore.storeInstallation(existingInstallation);
+      console.log('✅ Stored installation for workspace:', teamInfo.team.id);
       console.log('🔄 Migrated existing workspace to OAuth store:', teamInfo.team.name, `(${teamInfo.team.id})`);
     } catch (error) {
       console.error('❌ Could not detect existing workspace info:', error.message);
@@ -237,8 +242,12 @@ if (isOAuthMode && process.env.SLACK_BOT_TOKEN) {
     }
   };
   
-  // Run detection asynchronously
-  detectExistingWorkspace();
+  // Run detection asynchronously after a delay
+  setImmediate(() => {
+    detectExistingWorkspace().catch(error => {
+      console.error('❌ Workspace migration failed:', error);
+    });
+  });
 }
 
 // In-memory storage for message batching and canvas tracking
@@ -1560,16 +1569,20 @@ app.error((error) => {
   console.error('Slack app error:', error);
 });
 
+// Add Socket Mode error handling
+app.error((error) => {
+  console.error('Slack app error:', error);
+  if (error.message && error.message.includes('server explicit disconnect')) {
+    console.log('🔄 Socket Mode disconnected, will attempt reconnection...');
+  }
+});
+
 // Start the app with HTTP server for Render port binding
 (async () => {
   try {
     const port = process.env.PORT || 10000;
     
-    // Start Slack app in Socket Mode (no HTTP needed for Slack)
-    await app.start();
-    console.log(`⚡️ Paper Slack app connected via Socket Mode!`);
-    
-    // Start HTTP server for Render port detection
+    // Start HTTP server first for Render port detection
     const express = require('express');
     const httpApp = express();
     
@@ -1586,6 +1599,34 @@ app.error((error) => {
     httpApp.get('/health', (req, res) => {
       res.json({ status: 'ok', timestamp: Date.now() });
     });
+    
+    // Start HTTP server early
+    httpApp.listen(port, '0.0.0.0', () => {
+      console.log(`🌐 HTTP server running on port ${port} for Render!`);
+    });
+    
+    // Start Slack app in Socket Mode with retry logic
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    while (retryCount < maxRetries) {
+      try {
+        await app.start();
+        console.log(`⚡️ Paper Slack app connected via Socket Mode!`);
+        break; // Success, exit retry loop
+      } catch (startError) {
+        retryCount++;
+        console.error(`❌ Socket Mode connection attempt ${retryCount} failed:`, startError.message);
+        
+        if (retryCount < maxRetries) {
+          const delay = retryCount * 2000; // Exponential backoff
+          console.log(`🔄 Retrying Socket Mode connection in ${delay/1000} seconds...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        } else {
+          throw startError; // Final failure
+        }
+      }
+    }
 
     // Environment debug endpoint (for troubleshooting)
     httpApp.get('/debug', (req, res) => {
@@ -2387,11 +2428,6 @@ app.error((error) => {
         console.log('✅ Paper successfully installed in workspace:', installation.team?.name, `(${installation.team?.id})`);
       };
     }
-    
-    // Start HTTP server on the required port
-    httpApp.listen(port, '0.0.0.0', () => {
-      console.log(`🌐 HTTP server running on port ${port} for Render!`);
-    });
     
   } catch (error) {
     console.error('Failed to start app:', error);
