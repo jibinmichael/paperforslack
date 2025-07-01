@@ -154,7 +154,7 @@ You are creating a conversation summary in Granola-style format, optimized for S
 **Format the summary exactly as follows:**
 
 ## 🗣️ **Key Participants**
-- <@USER_ID>: Their key contributions and role in discussion
+- **Real Name**: Their key contributions and role in discussion
 - Focus on who drove decisions or important discussions
 
 ## 💬 **Main Discussion Points**  
@@ -168,7 +168,7 @@ You are creating a conversation summary in Granola-style format, optimized for S
 - Include decision owners when mentioned
 
 ## 🎯 **Action Items & Next Steps**
-- [ ] <@USER_ID>: Specific task or responsibility with checkbox for tracking
+- [ ] **Real Name**: Specific task or responsibility with checkbox for tracking
 - [ ] **Timeline**: Any deadlines or timeframes mentioned with checkbox
 - [ ] **Follow-up**: Required next steps or meetings with interactive checkbox
 
@@ -236,21 +236,27 @@ function shouldProcessBatch(channelId) {
   ) && !data.pendingUpdate;
 }
 
-// Get user display names for better participant formatting
+// Get user display names and timezone info for better participant formatting
 async function getUserDisplayNames(userIds) {
   const userNames = {};
+  let userTimezone = 'America/New_York'; // Default timezone
   
   for (const userId of [...new Set(userIds)]) {
     try {
       const userInfo = await app.client.users.info({ user: userId });
       userNames[userId] = userInfo.user.real_name || userInfo.user.display_name || userInfo.user.name;
+      
+      // Get timezone from the first user (assuming they're in the same workspace)
+      if (userInfo.user.tz && userTimezone === 'America/New_York') {
+        userTimezone = userInfo.user.tz;
+      }
     } catch (error) {
       console.log(`⚠️ Cannot fetch user info (missing users:read scope), using user ID: ${userId}`);
       userNames[userId] = `User ${userId.substring(0,8)}`; // More readable fallback
     }
   }
   
-  return userNames;
+  return { userNames, userTimezone };
 }
 
 // Smart message selection for very long conversations
@@ -294,9 +300,9 @@ async function generateSummary(messages) {
     
     console.log(`📝 Generating summary from ${selectedMessages.length} messages${isFiltered ? ` (filtered from ${messages.length})` : ''}`);
     
-    // Get user display names
+    // Get user display names and timezone
     const userIds = selectedMessages.map(msg => msg.user);
-    const userNames = await getUserDisplayNames(userIds);
+    const { userNames, userTimezone } = await getUserDisplayNames(userIds);
     
     // Extract links and dates from ALL messages (not just selected ones)
     const links = extractLinks(messages);
@@ -311,15 +317,15 @@ async function generateSummary(messages) {
 
 **IMPORTANT FORMATTING INSTRUCTIONS:**
 - For action items, use interactive checkboxes: "- [ ] Task description"
-- Use ONLY clickable user mentions like <@${Object.keys(userNames)[0] || 'USER_ID'}> - NO extra text after the mention
-- Make action items specific and actionable: "- [ ] <@USER_ID>: Task description"
+- Use REAL USER NAMES that are clickable, NOT user IDs: "**${Object.values(userNames)[0] || 'User Name'}**"
+- Make action items specific and actionable: "- [ ] **Real Name**: Task description"
 - Use blockquotes (>) for key insights, important decisions, or standout quotes  
 - If dates/times are mentioned, add them to ONE "📅 Important Dates & Times" section
 - Links will be added separately - don't include raw URLs in your summary
-- Format ALL participant references as clean mentions: <@USER_ID> with no additional text
+- Format ALL participant references with their real names in bold: **Name**
 
-**USER MAPPING FOR MENTIONS:**
-${Object.entries(userNames).map(([id, name]) => `${id} = ${name} → use <@${id}> (clean mention only)`).join('\n')}
+**USER MAPPING FOR NAMES:**
+${Object.entries(userNames).map(([id, name]) => `${id} = ${name} → use **${name}**`).join('\n')}
 
 **CONVERSATION CONTEXT:**
 ${isFiltered ? `- This is a LONG conversation (${messages.length} total messages) - you're seeing selected key messages from beginning, middle, and recent activity` : `- Complete conversation with ${messages.length} messages`}
@@ -349,6 +355,7 @@ ${links.length > 0 ? `- Links shared: ${links.length} links (will be grouped sep
       summary: response.choices[0].message.content,
       links: links,
       dates: dates,
+      userTimezone: userTimezone,
       messageCount: {
         total: messages.length,
         processed: selectedMessages.length,
@@ -361,6 +368,7 @@ ${links.length > 0 ? `- Links shared: ${links.length} links (will be grouped sep
       summary: "❌ Error generating summary. Please try again later.",
       links: [],
       dates: [],
+      userTimezone: 'America/New_York',
       messageCount: {
         total: messages.length,
         processed: 0,
@@ -371,7 +379,7 @@ ${links.length > 0 ? `- Links shared: ${links.length} links (will be grouped sep
 }
 
 // Create beautiful Canvas with enhanced formatting (no title duplication)
-async function createCanvasContent(summaryData) {
+async function createCanvasContent(summaryData, userTimezone = 'America/New_York') {
   let content = summaryData.summary;
   
   // Add links section if any links were shared  
@@ -393,22 +401,23 @@ async function createCanvasContent(summaryData) {
       `📊 Summarized ${messageInfo.processed} key messages from ${messageInfo.total} total messages` :
       `📊 Summarized all ${messageInfo.total} messages`) : '';
 
+  // Get user timezone-aware timestamp
+  const now = new Date();
+  const timeString = now.toLocaleString('en-US', {
+    timeZone: userTimezone,
+    weekday: 'short',
+    year: 'numeric', 
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short'
+  });
+
   content += `\n\n---
 
-*🤖 Auto-generated by Paper • Last updated: ${new Date().toLocaleString()}*
-${messageStats ? `\n*${messageStats}*` : ''}
-
----
-
-### 🔄 **How Paper Works**
-- **Smart Bootstrap**: Creates Canvas from 14 days of history when joining
-- **Smart Batching**: Summarizes every 10 messages or 2 minutes
-- **Auto-Updates**: Canvas refreshes automatically  
-- **AI-Powered**: Uses OpenAI GPT-4 for intelligent summaries
-- **Multi-Day Support**: Handles conversations with 1000+ messages
-- **Granola Format**: Structured, scannable conversation insights
-
-*💡 Mention @Paper with "summary" to trigger manual updates*`;
+*🤖 Auto-generated by Paper • Last updated: ${timeString}*
+${messageStats ? `\n*${messageStats}*` : ''}`;
 
   return content;
 }
@@ -701,7 +710,7 @@ async function updateCanvasWithClient(channelId, summaryData, client, teamId) {
       }
     }
     
-    const canvasContent = await createCanvasContent(summaryData);
+    const canvasContent = await createCanvasContent(summaryData, summaryData.userTimezone);
     const canvasTitle = await generateCanvasTitle(summaryData);
     
     if (!canvasId) {
@@ -785,7 +794,7 @@ async function updateCanvas(channelId, summaryData) {
       }
     }
     
-    const canvasContent = await createCanvasContent(summaryData);
+    const canvasContent = await createCanvasContent(summaryData, summaryData.userTimezone);
     const canvasTitle = await generateCanvasTitle(summaryData);
     
     if (!canvasId) {
@@ -798,7 +807,9 @@ async function updateCanvas(channelId, summaryData) {
         document_content: {
           type: "markdown",
           markdown: canvasContent
-        }
+        },
+        unfurl_links: true,
+        unfurl_media: true
       });
       
       canvasId = response.canvas_id;
@@ -816,19 +827,10 @@ async function updateCanvas(channelId, summaryData) {
         console.log(`⚠️ Cannot fetch team info (missing team:read scope), using generic Canvas URL`);
       }
       
-      // Clean Canvas creation notification
+      // Clean Canvas creation notification with preview
       await client.chat.postMessage({
         channel: channelId,
-        text: `📄 <${canvasUrl}|${canvasTitle}>`,
-        blocks: [
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: `📄 <${canvasUrl}|${canvasTitle}> ✨`
-            }
-          }
-        ],
+        text: `📄 <${canvasUrl}|${canvasTitle}> ✨`,
         unfurl_links: true,
         unfurl_media: true
       });
@@ -847,7 +849,9 @@ async function updateCanvas(channelId, summaryData) {
               markdown: canvasContent
             }
           }
-        ]
+        ],
+        unfurl_links: true,
+        unfurl_media: true
       });
       
       // Also update the title dynamically
