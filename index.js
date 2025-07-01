@@ -857,104 +857,137 @@ async function updateCanvasWithClient(channelId, summaryData, client, teamId) {
 // Create or update summary using Canvas API (fallback for legacy calls)
 async function updateCanvas(channelId, summaryData) {
   try {
-    // First check if we have a stored canvas ID
-    let canvasId = canvasData.get(channelId);
-    
-    // If not, check if channel already has a canvas
-    if (!canvasId) {
-      canvasId = await getExistingCanvasId(channelId);
-      if (canvasId === 'CHANNEL_INACCESSIBLE') {
-        console.log(`🚫 Skipping inaccessible channel: ${channelId}`);
-        return; // Exit early for inaccessible channels
-      }
-      if (canvasId) {
-        canvasData.set(channelId, canvasId);
-        console.log('📄 Found existing canvas for channel:', channelId, 'Canvas ID:', canvasId);
-      }
-    }
-    
-    const canvasContent = await createCanvasContent(summaryData);
-    const canvasTitle = await generateCanvasTitle(summaryData);
-    
-    if (!canvasId) {
-      // Create new channel canvas using the correct API
-      console.log('🎨 Creating new channel canvas:', channelId);
-      
-      const response = await app.client.apiCall('conversations.canvases.create', {
-        channel_id: channelId,
-        title: canvasTitle,
-        document_content: {
-          type: "markdown",
-          markdown: canvasContent
-        }
-      });
-      
-      canvasId = response.canvas_id;
-      canvasData.set(channelId, canvasId);
-      
-      console.log(`✅ Channel Canvas created successfully: ${canvasId}`);
-      
-      // Get workspace info for Canvas link (with fallback for missing team:read scope)
-      let canvasUrl = `https://slack.com/canvas/${canvasId}`; // Generic fallback
+    // Get workspace-specific client in OAuth mode
+    let client, teamId;
+    if (isOAuthMode) {
+      // Get channel info to determine team ID
+      let channelInfo;
       try {
-        const teamInfo = await app.client.team.info();
-        const workspaceUrl = `https://${teamInfo.team.domain}.slack.com`;
-        canvasUrl = `${workspaceUrl}/docs/${teamInfo.team.id}/${canvasId}`;
+        channelInfo = await app.client.conversations.info({ channel: channelId });
       } catch (error) {
-        console.log(`⚠️ Cannot fetch team info (missing team:read scope), using generic Canvas URL`);
+        console.error(`❌ Cannot get channel info for canvas update: ${error.message}`);
+        return;
       }
       
-      // Clean Canvas creation notification
-      await app.client.chat.postMessage({
-        channel: channelId,
-        text: `📄 <${canvasUrl}|${canvasTitle}>`,
-        blocks: [
-          {
-            type: "section",
-            text: {
-              type: "mrkdwn",
-              text: `📄 <${canvasUrl}|${canvasTitle}> ✨`
-            }
-          }
-        ],
-        unfurl_links: true,
-        unfurl_media: true
-      });
+      teamId = channelInfo.channel?.shared_team_ids?.[0] || 'UNKNOWN';
+      console.log(`🔍 Canvas update: Getting installation for team ${teamId}`);
+      
+      const installation = await installationStore.fetchInstallation({ teamId });
+      if (!installation) {
+        console.error(`❌ No installation found for team ${teamId} during canvas update`);
+        return;
+      }
+      
+      // Create WebClient with workspace-specific token
+      const { WebClient } = require('@slack/web-api');
+      client = new WebClient(installation.bot.token);
+      console.log(`🔍 Canvas update: Using workspace token ${installation.bot.token.substring(0, 15)}...`);
+      
+      // Use multi-workspace canvas update function
+      await updateCanvasWithClient(channelId, summaryData, client, teamId);
     } else {
-      // Update existing canvas with enhanced content
-      console.log('🔄 Updating existing canvas:', canvasId);
+      // Use single-workspace logic with global client
+      client = app.client;
       
-      // Update canvas content and title
-      await app.client.apiCall('canvases.edit', {
-        canvas_id: canvasId,
-        changes: [
-          {
-            operation: "replace",
-            document_content: {
-              type: "markdown", 
-              markdown: canvasContent
-            }
+      // First check if we have a stored canvas ID
+      let canvasId = canvasData.get(channelId);
+      
+      // If not, check if channel already has a canvas
+      if (!canvasId) {
+        canvasId = await getExistingCanvasId(channelId);
+        if (canvasId === 'CHANNEL_INACCESSIBLE') {
+          console.log(`🚫 Skipping inaccessible channel: ${channelId}`);
+          return; // Exit early for inaccessible channels
+        }
+        if (canvasId) {
+          canvasData.set(channelId, canvasId);
+          console.log('📄 Found existing canvas for channel:', channelId, 'Canvas ID:', canvasId);
+        }
+      }
+      
+      const canvasContent = await createCanvasContent(summaryData);
+      const canvasTitle = await generateCanvasTitle(summaryData);
+      
+      if (!canvasId) {
+        // Create new channel canvas using the correct API
+        console.log('🎨 Creating new channel canvas:', channelId);
+        
+        const response = await client.apiCall('conversations.canvases.create', {
+          channel_id: channelId,
+          title: canvasTitle,
+          document_content: {
+            type: "markdown",
+            markdown: canvasContent
           }
-        ]
-      });
-      
-      // Also update the title dynamically
-      try {
-        await app.client.apiCall('canvases.edit', {
+        });
+        
+        canvasId = response.canvas_id;
+        canvasData.set(channelId, canvasId);
+        
+        console.log(`✅ Channel Canvas created successfully: ${canvasId}`);
+        
+        // Get workspace info for Canvas link (with fallback for missing team:read scope)
+        let canvasUrl = `https://slack.com/canvas/${canvasId}`; // Generic fallback
+        try {
+          const teamInfo = await client.team.info();
+          const workspaceUrl = `https://${teamInfo.team.domain}.slack.com`;
+          canvasUrl = `${workspaceUrl}/docs/${teamInfo.team.id}/${canvasId}`;
+        } catch (error) {
+          console.log(`⚠️ Cannot fetch team info (missing team:read scope), using generic Canvas URL`);
+        }
+        
+        // Clean Canvas creation notification
+        await client.chat.postMessage({
+          channel: channelId,
+          text: `📄 <${canvasUrl}|${canvasTitle}>`,
+          blocks: [
+            {
+              type: "section",
+              text: {
+                type: "mrkdwn",
+                text: `📄 <${canvasUrl}|${canvasTitle}> ✨`
+              }
+            }
+          ],
+          unfurl_links: true,
+          unfurl_media: true
+        });
+      } else {
+        // Update existing canvas with enhanced content
+        console.log('🔄 Updating existing canvas:', canvasId);
+        
+        // Update canvas content and title
+        await client.apiCall('canvases.edit', {
           canvas_id: canvasId,
           changes: [
             {
               operation: "replace",
-              title: canvasTitle
+              document_content: {
+                type: "markdown", 
+                markdown: canvasContent
+              }
             }
           ]
         });
-        console.log(`📝 Canvas title updated to: ${canvasTitle}`);
-      } catch (titleError) {
-        console.log('📝 Canvas title update not supported by API, keeping original title');
+        
+        // Also update the title dynamically
+        try {
+          await client.apiCall('canvases.edit', {
+            canvas_id: canvasId,
+            changes: [
+              {
+                operation: "replace",
+                title: canvasTitle
+              }
+            ]
+          });
+          console.log(`📝 Canvas title updated to: ${canvasTitle}`);
+        } catch (titleError) {
+          console.log('📝 Canvas title update not supported by API, keeping original title');
+        }
+        
+        console.log(`✅ Canvas updated successfully: ${canvasId}`);
       }
-      
-      console.log(`✅ Canvas updated successfully: ${canvasId}`);
     }
   } catch (error) {
     if (error.data?.error === 'channel_not_found') {
@@ -970,7 +1003,23 @@ async function updateCanvas(channelId, summaryData) {
     
     // Enhanced fallback with better formatting
     try {
-      await app.client.chat.postMessage({
+      // Use workspace-specific client for fallback too
+      let fallbackClient = app.client;
+      if (isOAuthMode) {
+        try {
+          const channelInfo = await app.client.conversations.info({ channel: channelId });
+          const teamId = channelInfo.channel?.shared_team_ids?.[0] || 'UNKNOWN';
+          const installation = await installationStore.fetchInstallation({ teamId });
+          if (installation) {
+            const { WebClient } = require('@slack/web-api');
+            fallbackClient = new WebClient(installation.bot.token);
+          }
+        } catch (fallbackClientError) {
+          console.log('Using global client for fallback message');
+        }
+      }
+      
+      await fallbackClient.chat.postMessage({
         channel: channelId,
         text: "📄 *Paper: Conversation Summary*",
         blocks: [
@@ -1219,7 +1268,41 @@ app.message(async ({ message, say }) => {
     
     // Bootstrap in background, don't block message processing
     setTimeout(async () => {
-      await bootstrapChannelCanvas(channelId);
+      try {
+        // Get workspace-specific client in OAuth mode
+        if (isOAuthMode) {
+          // Get channel info to determine team ID
+          let channelInfo;
+          try {
+            channelInfo = await app.client.conversations.info({ channel: channelId });
+          } catch (error) {
+            console.error(`❌ Cannot get channel info for bootstrap: ${error.message}`);
+            return;
+          }
+          
+          const teamId = channelInfo.channel?.shared_team_ids?.[0] || 'UNKNOWN';
+          console.log(`🔍 Bootstrap: Getting installation for team ${teamId}`);
+          
+          const installation = await installationStore.fetchInstallation({ teamId });
+          if (!installation) {
+            console.error(`❌ No installation found for team ${teamId} during bootstrap`);
+            return;
+          }
+          
+          // Create WebClient with workspace-specific token
+          const { WebClient } = require('@slack/web-api');
+          const client = new WebClient(installation.bot.token);
+          console.log(`🔍 Bootstrap: Using workspace token ${installation.bot.token.substring(0, 15)}...`);
+          
+          // Use multi-workspace bootstrap function
+          await bootstrapChannelCanvasWithClient(channelId, client, teamId);
+        } else {
+          // Use single-workspace bootstrap function in token mode
+          await bootstrapChannelCanvas(channelId);
+        }
+      } catch (error) {
+        console.error(`❌ Error bootstrapping channel ${channelId}:`, error);
+      }
     }, 1000);
   }
   
@@ -1242,7 +1325,40 @@ app.event('app_mention', async ({ event, say }) => {
       // Bootstrap check: If not bootstrapped yet, do it now
       if (!bootstrappedChannels.has(channelId)) {
         console.log(`🎯 Manual summary requested in unboostrapped channel ${channelId}, bootstrapping first...`);
-        await bootstrapChannelCanvas(channelId, say);
+        
+        // Get workspace-specific client for bootstrap in OAuth mode
+        if (isOAuthMode) {
+          // Get channel info to determine team ID
+          let channelInfo;
+          try {
+            channelInfo = await app.client.conversations.info({ channel: channelId });
+          } catch (error) {
+            console.error(`❌ Cannot get channel info for manual bootstrap: ${error.message}`);
+            await say("📄 Hi! I had trouble accessing this channel. Please try again! 🔧");
+            return;
+          }
+          
+          const teamId = channelInfo.channel?.shared_team_ids?.[0] || 'UNKNOWN';
+          console.log(`🔍 Manual bootstrap: Getting installation for team ${teamId}`);
+          
+          const installation = await installationStore.fetchInstallation({ teamId });
+          if (!installation) {
+            console.error(`❌ No installation found for team ${teamId} during manual bootstrap`);
+            await say("📄 Hi! I need to be properly installed in this workspace. Please reinstall Paper! 🔧");
+            return;
+          }
+          
+          // Create WebClient with workspace-specific token
+          const { WebClient } = require('@slack/web-api');
+          const client = new WebClient(installation.bot.token);
+          console.log(`🔍 Manual bootstrap: Using workspace token ${installation.bot.token.substring(0, 15)}...`);
+          
+          // Use multi-workspace bootstrap function
+          await bootstrapChannelCanvasWithClient(channelId, client, teamId, say);
+        } else {
+          // Use single-workspace bootstrap function in token mode
+          await bootstrapChannelCanvas(channelId, say);
+        }
         return; // Bootstrap will create the Canvas
       }
       
