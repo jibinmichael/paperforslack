@@ -154,7 +154,7 @@ You are creating a conversation summary in Granola-style format, optimized for S
 **Format the summary exactly as follows:**
 
 ## 🗣️ **Key Participants**
-- **<@USER_ID>**: Their key contributions and role in discussion
+- <@USER_ID>: Their key contributions and role in discussion
 - Focus on who drove decisions or important discussions
 
 ## 💬 **Main Discussion Points**  
@@ -168,14 +168,13 @@ You are creating a conversation summary in Granola-style format, optimized for S
 - Include decision owners when mentioned
 
 ## 🎯 **Action Items & Next Steps**
-- [ ] **<@USER_ID>**: Specific task or responsibility with checkbox for tracking
+- [ ] <@USER_ID>: Specific task or responsibility with checkbox for tracking
 - [ ] **Timeline**: Any deadlines or timeframes mentioned with checkbox
 - [ ] **Follow-up**: Required next steps or meetings with interactive checkbox
 
 ## 📌 **Key Insights & Resources**
 > Important quotes or standout insights
 - Key insights and takeaways
-- Links, documents, or resources shared
 - Context that might be valuable later
 
 ## 🔍 **Context & Background**
@@ -312,15 +311,15 @@ async function generateSummary(messages) {
 
 **IMPORTANT FORMATTING INSTRUCTIONS:**
 - For action items, use interactive checkboxes: "- [ ] Task description"
-- Use clickable user mentions for participants: ${Object.entries(userNames).map(([id, name]) => `<@${id}> (${name})`).join(', ')}
-- Make action items specific and actionable with clickable user mentions: "- [ ] Task description <@USER_ID>"
-- Use blockquotes (>) for key insights, important decisions, or standout quotes
-- If dates/times are mentioned, add a "## 📅 **Important Dates & Times**" section
-- If links are shared, they will be added separately - don't include them in your summary
-- Format participant names as clickable mentions: <@USER_ID> instead of just names
+- Use ONLY clickable user mentions like <@${Object.keys(userNames)[0] || 'USER_ID'}> - NO extra text after the mention
+- Make action items specific and actionable: "- [ ] <@USER_ID>: Task description"
+- Use blockquotes (>) for key insights, important decisions, or standout quotes  
+- If dates/times are mentioned, add them to ONE "📅 Important Dates & Times" section
+- Links will be added separately - don't include raw URLs in your summary
+- Format ALL participant references as clean mentions: <@USER_ID> with no additional text
 
 **USER MAPPING FOR MENTIONS:**
-${Object.entries(userNames).map(([id, name]) => `${id} = ${name} (use <@${id}>)`).join('\n')}
+${Object.entries(userNames).map(([id, name]) => `${id} = ${name} → use <@${id}> (clean mention only)`).join('\n')}
 
 **CONVERSATION CONTEXT:**
 ${isFiltered ? `- This is a LONG conversation (${messages.length} total messages) - you're seeing selected key messages from beginning, middle, and recent activity` : `- Complete conversation with ${messages.length} messages`}
@@ -375,19 +374,16 @@ ${links.length > 0 ? `- Links shared: ${links.length} links (will be grouped sep
 async function createCanvasContent(summaryData) {
   let content = summaryData.summary;
   
-  // Add links section if any links were shared
+  // Add links section if any links were shared  
   if (summaryData.links && summaryData.links.length > 0) {
     content += `\n\n---\n\n## 🔗 **Links & Resources**\n\n`;
     summaryData.links.forEach(link => {
-      content += `- [${link}](${link})\n`;
-    });
-  }
-  
-  // Add dates section if any dates were mentioned
-  if (summaryData.dates && summaryData.dates.length > 0) {
-    content += `\n\n## 📅 **Important Dates & Times**\n\n`;
-    summaryData.dates.forEach(date => {
-      content += `- ${date}\n`;
+      if (typeof link === 'object' && link.url && link.title) {
+        content += `- [${link.title}](${link.url})\n`;
+      } else {
+        // Fallback for old format
+        content += `- [${link}](${link})\n`;
+      }
     });
   }
   
@@ -472,7 +468,7 @@ ${summaryData.summary.substring(0, 500)}...`;
   }
 }
 
-// Extract links from messages
+// Extract links from messages with better formatting
 function extractLinks(messages) {
   const linkRegex = /(https?:\/\/[^\s]+)/g;
   const links = [];
@@ -483,8 +479,41 @@ function extractLinks(messages) {
       foundLinks.forEach(link => {
         // Clean up link (remove trailing punctuation)
         const cleanLink = link.replace(/[.,;!?]$/, '');
-        if (!links.includes(cleanLink)) {
-          links.push(cleanLink);
+        
+        if (!links.find(l => l.url === cleanLink)) {
+          // Try to extract a meaningful title from common domains
+          let title = cleanLink;
+          try {
+            const urlObj = new URL(cleanLink);
+            const domain = urlObj.hostname.replace('www.', '');
+            
+            // Extract meaningful titles for common domains
+            if (domain.includes('google.com') && urlObj.pathname.includes('/spreadsheets/')) {
+              title = '📊 Google Spreadsheet';
+            } else if (domain.includes('docs.google.com')) {
+              title = '📝 Google Docs';
+            } else if (domain.includes('github.com')) {
+              title = '👨‍💻 GitHub Repository';
+            } else if (domain.includes('figma.com')) {
+              title = '🎨 Figma Design';
+            } else if (domain.includes('slack.com')) {
+              title = '💬 Slack Link';
+            } else if (domain.includes('youtube.com') || domain.includes('youtu.be')) {
+              title = '📺 YouTube Video';
+            } else if (domain.includes('zoom.us')) {
+              title = '📹 Zoom Meeting';
+            } else if (domain.includes('notion.')) {
+              title = '📋 Notion Page';
+            } else if (domain.includes('trello.com')) {
+              title = '📌 Trello Board';
+            } else {
+              title = `🔗 ${domain.charAt(0).toUpperCase() + domain.slice(1)}`;
+            }
+          } catch (error) {
+            title = `🔗 ${cleanLink.substring(0, 50)}...`;
+          }
+          
+          links.push({ url: cleanLink, title });
         }
       });
     }
@@ -919,11 +948,11 @@ async function bootstrapChannelCanvas(channelId, say = null) {
     let result;
     try {
       result = await client.conversations.history({
-        channel: channelId,
-        oldest: fourteenDaysAgo.toString(),
-        limit: CONFIG.MAX_CONVERSATION_HISTORY,
-        exclude_archived: true
-      });
+      channel: channelId,
+      oldest: fourteenDaysAgo.toString(),
+      limit: CONFIG.MAX_CONVERSATION_HISTORY,
+      exclude_archived: true
+    });
     } catch (historyError) {
       if (historyError.data?.error === 'channel_not_found') {
         console.log(`🚫 Channel ${channelId} not accessible - app may have been removed or channel deleted`);
@@ -1073,8 +1102,8 @@ app.event('member_joined_channel', async ({ event, say, client }) => {
 // Listen to all messages
 app.message(async ({ message, say }) => {
   try {
-    // Skip bot messages and system messages
-    if (message.subtype || message.bot_id) return;
+  // Skip bot messages and system messages
+  if (message.subtype || message.bot_id) return;
     
     console.log(`💬 Message event received in channel ${message.channel}`);
     
@@ -1093,7 +1122,7 @@ app.message(async ({ message, say }) => {
     // Bootstrap in background, don't block message processing
     setTimeout(async () => {
       try {
-        await bootstrapChannelCanvas(channelId);
+      await bootstrapChannelCanvas(channelId);
       } catch (error) {
         console.error(`❌ Error bootstrapping channel ${channelId}:`, error);
       }
@@ -1124,7 +1153,7 @@ app.event('app_mention', async ({ event, say }) => {
       return;
     }
     
-    const channelId = event.channel;
+  const channelId = event.channel;
   
   if (event.text.includes('summary') || event.text.includes('update')) {
     try {
@@ -1135,17 +1164,17 @@ app.event('app_mention', async ({ event, say }) => {
         return; // Bootstrap will create the Canvas
       }
       
-      // Fetch recent conversation history from Slack
+      // Fetch recent conversation history from Slack  
       console.log('Fetching conversation history for channel:', channelId);
       const client = app.client;
       
       let result;
       try {
         result = await client.conversations.history({
-          channel: channelId,
-          limit: CONFIG.MAX_CONVERSATION_HISTORY,
-          exclude_archived: true
-        });
+        channel: channelId,
+        limit: CONFIG.MAX_CONVERSATION_HISTORY,
+        exclude_archived: true
+      });
       } catch (historyError) {
         if (historyError.data?.error === 'channel_not_found') {
           console.log(`🚫 Channel ${channelId} not accessible during manual summary request`);
@@ -1355,7 +1384,7 @@ app.error((error) => {
     httpApp.get('/health', (req, res) => {
       res.json({ status: 'ok', timestamp: Date.now() });
     });
-    
+
     // Start HTTP server early
     httpApp.listen(port, '0.0.0.0', () => {
       console.log(`🌐 HTTP server running on port ${port} for Render!`);
@@ -1417,7 +1446,7 @@ app.error((error) => {
           const delay = retryCount * 2000; // Exponential backoff
           console.log(`🔄 Retrying Socket Mode connection in ${delay/1000} seconds...`);
           await new Promise(resolve => setTimeout(resolve, delay));
-        } else {
+          } else {
           throw startError; // Final failure
         }
       }
@@ -1465,51 +1494,51 @@ app.error((error) => {
 
     // Token mode - OAuth endpoints not needed
     httpApp.get('/install', (req, res) => {
-      res.send(`
-        <!DOCTYPE html>
-        <html>
-          <head>
+        res.send(`
+          <!DOCTYPE html>
+          <html>
+            <head>
             <title>Paper for Slack - Token Mode</title>
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-            <style>
-              * { 
-                margin: 0; 
-                padding: 0; 
-                box-sizing: border-box; 
-              }
-              
-              body { 
+              <style>
+                * { 
+                  margin: 0; 
+                  padding: 0; 
+                  box-sizing: border-box; 
+                }
+                
+                body { 
                 font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                 background: #f5f5f7;
-                min-height: 100vh;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: 20px;
+                  min-height: 100vh;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  padding: 20px;
                 color: #1d1d1f;
-              }
-              
-              .container { 
+                }
+                
+                .container { 
                 max-width: 480px;
                 background: #ffffff;
                 padding: 48px 40px;
                 border-radius: 18px;
-                text-align: center;
+                  text-align: center;
                 box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04), 0 1px 4px rgba(0, 0, 0, 0.08);
                 border: 1px solid rgba(0, 0, 0, 0.05);
               }
               
               .logo { 
                 font-size: 48px; 
-                margin-bottom: 16px; 
+                  margin-bottom: 16px;
                 display: block;
               }
               
               .title { 
                 color: #1d1d1f; 
                 font-size: 28px; 
-                font-weight: 600; 
+                  font-weight: 600;
                 margin-bottom: 12px;
                 letter-spacing: -0.015em;
               }
@@ -1520,18 +1549,18 @@ app.error((error) => {
                 margin-bottom: 32px;
                 font-weight: 400;
                 line-height: 1.4;
-              }
-            </style>
-          </head>
-          <body>
-            <div class="container">
+                }
+              </style>
+            </head>
+            <body>
+              <div class="container">
               <span class="logo">📄</span>
               <h1 class="title">Paper</h1>
               <p class="subtitle">Running in single-workspace token mode</p>
-            </div>
-          </body>
-        </html>
-      `);
+              </div>
+            </body>
+          </html>
+        `);
     });
     
     // Token mode - no OAuth installation handling needed
