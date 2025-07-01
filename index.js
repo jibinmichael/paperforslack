@@ -1,7 +1,72 @@
 const { App } = require('@slack/bolt');
 const { WebClient } = require('@slack/web-api');
 const OpenAI = require('openai');
-require('dotenv').config();
+const path = require('path');
+const fs = require('fs');
+
+// Debug environment loading
+console.log('🔍 Debug Info:');
+console.log('   Current working directory:', process.cwd());
+console.log('   __dirname:', __dirname);
+console.log('   Looking for .env at:', path.join(process.cwd(), '.env'));
+console.log('   .env file exists:', fs.existsSync('.env'));
+
+if (fs.existsSync('.env')) {
+  const envContent = fs.readFileSync('.env', 'utf8');
+  const lines = envContent.split('\n').filter(line => line.trim() && !line.startsWith('#'));
+  console.log('   .env file has', lines.length, 'non-empty lines');
+  console.log('   First few variable names:', lines.slice(0, 3).map(line => line.split('=')[0]));
+}
+
+// Load environment variables
+const dotenvResult = require('dotenv').config();
+console.log('   dotenv result:', dotenvResult.error ? `Error: ${dotenvResult.error}` : `Loaded ${Object.keys(dotenvResult.parsed || {}).length} variables`);
+
+// Production debugging - check if vars are available from environment
+console.log('🌐 Production environment check:');
+console.log('   NODE_ENV:', process.env.NODE_ENV);
+console.log('   Platform detected env vars:', ['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET', 'SLACK_APP_TOKEN', 'OPENAI_API_KEY'].map(key => `${key}: ${process.env[key] ? '✅' : '❌'}`).join(', '));
+
+// Validate required environment variables
+function validateEnvironmentVariables() {
+  const required = [
+    'SLACK_BOT_TOKEN',
+    'SLACK_SIGNING_SECRET', 
+    'SLACK_APP_TOKEN',
+    'OPENAI_API_KEY'
+  ];
+  
+  // Debug: Show what we actually have
+  console.log('🔍 Environment variable status:');
+  required.forEach(key => {
+    const value = process.env[key];
+    const status = value ? '✅' : '❌';
+    const preview = value ? `${value.substring(0, 10)}...` : 'undefined';
+    console.log(`   ${status} ${key}: ${preview}`);
+  });
+  
+  const missing = required.filter(key => !process.env[key]);
+  
+  if (missing.length > 0) {
+    console.error('\n❌ Missing required environment variables:');
+    missing.forEach(key => console.error(`   - ${key}`));
+    console.error('\n📋 Check your .env file format. Each line should be:');
+    console.error('VARIABLE_NAME=value');
+    console.error('(no spaces around the = sign)');
+    console.error('\n💡 Common .env file issues:');
+    console.error('   - Extra spaces around = sign');
+    console.error('   - Quotes around values (remove them)');
+    console.error('   - Empty lines with just variable names');
+    console.error('   - File saved with wrong encoding');
+    console.error('\n🔗 Get Slack tokens from: https://api.slack.com/apps');
+    process.exit(1);
+  }
+  
+  console.log('✅ Environment variables validated');
+}
+
+// Validate environment on startup
+validateEnvironmentVariables();
 
 // Initialize OpenAI
 const openai = new OpenAI({
@@ -604,13 +669,33 @@ async function bootstrapChannelCanvas(channelId, say = null) {
     // Calculate 14 days ago timestamp
     const fourteenDaysAgo = Math.floor((Date.now() - (CONFIG.BOOTSTRAP_DAYS_LOOKBACK * 24 * 60 * 60 * 1000)) / 1000);
     
-    // Fetch conversation history from last 14 days
-    const result = await app.client.conversations.history({
-      channel: channelId,
-      oldest: fourteenDaysAgo.toString(),
-      limit: CONFIG.MAX_CONVERSATION_HISTORY,
-      exclude_archived: true
-    });
+    // Fetch conversation history from last 14 days with better error handling
+    let result;
+    try {
+      result = await app.client.conversations.history({
+        channel: channelId,
+        oldest: fourteenDaysAgo.toString(),
+        limit: CONFIG.MAX_CONVERSATION_HISTORY,
+        exclude_archived: true
+      });
+    } catch (historyError) {
+      if (historyError.data?.error === 'channel_not_found') {
+        console.log(`🚫 Channel ${channelId} not accessible - app may have been removed or channel deleted`);
+        bootstrappedChannels.add(channelId); // Mark as processed to avoid retries
+        if (say) {
+          await say(`📄 Hi! I don't have access to this channel's history. Please re-add me to the channel or check my permissions! 🔧`);
+        }
+        return;
+      } else if (historyError.data?.error === 'missing_scope') {
+        console.log(`🚫 Missing required scope for channel ${channelId}: ${historyError.data.needed}`);
+        bootstrappedChannels.add(channelId);
+        if (say) {
+          await say(`📄 I need additional permissions to access this channel. Please check the app configuration! 🔧`);
+        }
+        return;
+      }
+      throw historyError; // Re-throw other errors
+    }
 
     if (result.messages && result.messages.length > 0) {
       // Convert and filter messages
@@ -685,14 +770,26 @@ async function processBatch(channelId) {
   data.pendingUpdate = true;
   
   try {
-    console.log(`Processing batch for channel ${channelId} with ${data.messages.length} messages`);
+    console.log(`📝 Processing batch for channel ${channelId} with ${data.messages.length} messages`);
     
     const summaryData = await generateSummary(data.messages);
     await updateCanvas(channelId, summaryData);
     
     data.lastBatchTime = Date.now();
+    console.log(`✅ Batch processed successfully for channel ${channelId}`);
   } catch (error) {
-    console.error('Error processing batch:', error);
+    console.error(`❌ Error processing batch for channel ${channelId}:`, error);
+    
+    // Handle specific channel access errors
+    if (error.data?.error === 'channel_not_found') {
+      console.log(`🚫 Cleaning up inaccessible channel: ${channelId}`);
+      channelData.delete(channelId);
+      canvasData.delete(channelId);
+      bootstrappedChannels.delete(channelId);
+    } else if (error.data?.error === 'missing_scope') {
+      console.log(`🚫 Missing scope for channel ${channelId}, marking as processed`);
+      bootstrappedChannels.add(channelId);
+    }
   } finally {
     data.pendingUpdate = false;
   }
@@ -759,13 +856,27 @@ app.event('app_mention', async ({ event, say }) => {
         return; // Bootstrap will create the Canvas
       }
       
-      // Fetch recent conversation history from Slack  
+      // Fetch recent conversation history from Slack with error handling
       console.log('Fetching conversation history for channel:', channelId);
-      const result = await app.client.conversations.history({
-        channel: channelId,
-        limit: CONFIG.MAX_CONVERSATION_HISTORY,
-        exclude_archived: true
-      });
+      let result;
+      try {
+        result = await app.client.conversations.history({
+          channel: channelId,
+          limit: CONFIG.MAX_CONVERSATION_HISTORY,
+          exclude_archived: true
+        });
+      } catch (historyError) {
+        if (historyError.data?.error === 'channel_not_found') {
+          console.log(`🚫 Channel ${channelId} not accessible during manual summary request`);
+          await say("📄 I don't have access to this channel's history. Please re-add me to the channel! 🔧");
+          return;
+        } else if (historyError.data?.error === 'missing_scope') {
+          console.log(`🚫 Missing required scope for channel ${channelId}: ${historyError.data.needed}`);
+          await say("📄 I need additional permissions to access this channel. Please check the app configuration! 🔧");
+          return;
+        }
+        throw historyError;
+      }
       
       if (result.messages && result.messages.length > 0) {
         // Convert messages to our format and filter out bot messages
@@ -810,10 +921,12 @@ app.event('app_mention', async ({ event, say }) => {
 app.event('app_home_opened', async ({ event, client }) => {
   try {
     // Ensure we have a valid user ID
-    if (!event.user) {
-      console.log('⚠️ App home opened but no user ID provided');
+    if (!event.user || typeof event.user !== 'string' || event.user.trim() === '') {
+      console.log('⚠️ App home opened but invalid user ID provided:', event.user);
       return;
     }
+    
+    console.log(`📱 Opening app home for user: ${event.user}`);
     
     await client.views.publish({
       user_id: event.user,
@@ -940,6 +1053,26 @@ app.error((error) => {
     
     httpApp.get('/health', (req, res) => {
       res.json({ status: 'ok', timestamp: Date.now() });
+    });
+
+    // Environment debug endpoint (for troubleshooting)
+    httpApp.get('/debug', (req, res) => {
+      const envStatus = ['SLACK_BOT_TOKEN', 'SLACK_SIGNING_SECRET', 'SLACK_APP_TOKEN', 'OPENAI_API_KEY']
+        .map(key => ({ 
+          name: key, 
+          present: !!process.env[key],
+          preview: process.env[key] ? process.env[key].substring(0, 10) + '...' : 'missing'
+        }));
+      
+      res.json({
+        status: 'debug',
+        timestamp: new Date().toISOString(),
+        environment: {
+          NODE_ENV: process.env.NODE_ENV,
+          variables: envStatus,
+          dotenv_loaded: dotenvResult.parsed ? Object.keys(dotenvResult.parsed).length : 0
+        }
+      });
     });
 
     // OAuth redirect handler for public installations

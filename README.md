@@ -1,143 +1,173 @@
-# 📄 Paper: Slack Canvas Conversation Summarizer
+# 📄 Paper - Slack Canvas Conversation Summarizer
 
-A minimal Slack app that creates and maintains Slack Canvas summaries of channel conversations in **Granola-style format**.
-
-## ✨ Features
-
-- 🎯 **Smart Batching**: Processes messages in 2-minute windows or 10-message batches
-- 🔄 **Auto-Updates**: Canvas updates every 3 minutes maximum
-- 🤖 **AI-Powered**: Uses OpenAI GPT-4 for intelligent summaries
-- 📋 **Granola-Style**: Clean, structured summaries with decisions and action items
-- ⚡ **Serverless**: Deployed on Vercel for reliability and scalability
+AI-powered Slack app that automatically creates and maintains Canvas summaries of your team conversations using OpenAI GPT-4.
 
 ## 🚀 Quick Setup
 
-### 1. Create Slack App
+### 1. Environment Variables
+Create a `.env` file in the root directory with the following variables:
 
-1. Go to [api.slack.com/apps](https://api.slack.com/apps)
-2. Click "Create New App" → "From an app manifest"
-3. Select your workspace
-4. Copy and paste the content from `slack-app-manifest.json`
-5. Create the app
+```bash
+# Slack App Configuration
+# Get these from your Slack app settings at https://api.slack.com/apps
 
-### 2. Get API Keys
+# Bot User OAuth Token (starts with xoxb-)
+SLACK_BOT_TOKEN=xoxb-your-token-here
 
-**Slack Tokens** (from your app's settings):
-- **Bot User OAuth Token**: `Settings > OAuth & Permissions`
-- **Signing Secret**: `Settings > Basic Information > Signing Secret`
-- **App Token**: `Settings > Basic Information > App-Level Tokens` (create one with `connections:write` scope)
+# Signing Secret (from Basic Information tab)
+SLACK_SIGNING_SECRET=your-signing-secret-here
 
-**OpenAI API Key**:
-- Get from [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+# App-Level Token (starts with xapp-, needed for Socket Mode)
+SLACK_APP_TOKEN=xapp-your-app-token-here
 
-### 3. Deploy to Vercel
+# OAuth Configuration (for public distribution)
+SLACK_CLIENT_ID=your-client-id
+SLACK_CLIENT_SECRET=your-client-secret
+SLACK_OAUTH_REDIRECT_URI=your-redirect-uri
 
-1. Fork this repository
-2. Connect to Vercel
-3. Set environment variables:
-   ```bash
-   SLACK_BOT_TOKEN=xoxb-your-bot-token
-   SLACK_SIGNING_SECRET=your-signing-secret
-   SLACK_APP_TOKEN=xapp-your-app-token
-   OPENAI_API_KEY=your-openai-key
-   ```
-4. Deploy!
+# OpenAI Configuration
+OPENAI_API_KEY=sk-your-openai-key-here
 
-### 4. Install to Channels
-
-1. Go to any Slack channel
-2. Type `/invite @Paper`
-3. Start chatting - Paper will automatically create summaries!
-
-## 🔧 Local Development
-
-1. Clone the repository:
-   ```bash
-   git clone <your-repo>
-   cd paper-slack-app
-   ```
-
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Create `.env` file:
-   ```bash
-   SLACK_BOT_TOKEN=xoxb-your-bot-token
-   SLACK_SIGNING_SECRET=your-signing-secret
-   SLACK_APP_TOKEN=xapp-your-app-token
-   OPENAI_API_KEY=your-openai-key
-   PORT=3000
-   NODE_ENV=development
-   ```
-
-4. Start development server:
-   ```bash
-   npm run dev
-   ```
-
-## 📋 How It Works
-
-1. **Message Listening**: Listens to all messages in channels where Paper is installed
-2. **Smart Batching**: Collects messages for 2 minutes OR until 10 messages accumulate
-3. **AI Summarization**: Uses OpenAI GPT-4 to create structured summaries
-4. **Canvas Management**: Creates or updates Slack Canvas with the summary
-5. **Rate Limiting**: Updates canvas maximum once every 3 minutes per channel
-
-## 🎯 Granola-Style Format
-
-Paper creates summaries with these sections:
-
-- **🗣️ Key Participants**: Main contributors to the discussion
-- **💬 Main Discussion Points**: Key topics and conversations
-- **✅ Decisions Made**: Clear outcomes and agreements
-- **🎯 Action Items**: Tasks and responsibilities
-- **📌 Important Notes**: Links, resources, and other relevant info
-
-## 🛡️ Safety Features
-
-- **Debounced Updates**: Prevents canvas spam
-- **Message Limits**: Processes max 50 recent messages
-- **Error Handling**: Graceful failures with user feedback
-- **Memory Cleanup**: Automatic cleanup of old data
-- **Rate Limiting**: Built-in delays to respect API limits
-
-## 💡 Usage Tips
-
-- **Manual Updates**: Mention `@Paper summary` to trigger immediate update
-- **Channel Integration**: Just add Paper to any channel and it starts working
-- **Canvas Access**: Click the "📋 View Summary Canvas" button to see summaries
-
-## 🔧 Configuration
-
-Key settings in `index.js`:
-
-```javascript
-const CONFIG = {
-  BATCH_TIME_WINDOW: 2 * 60 * 1000,    // 2 minutes
-  BATCH_MESSAGE_LIMIT: 10,              // 10 messages
-  CANVAS_UPDATE_DEBOUNCE: 3 * 60 * 1000, // 3 minutes
-  MAX_MESSAGES_FOR_SUMMARY: 50          // 50 messages max
-};
+# Server Configuration
+PORT=10000
+NODE_ENV=production
 ```
 
-## 🚨 Troubleshooting
+### 2. Install Dependencies
+```bash
+npm install
+```
 
-### Canvas Not Updating
-- Check OpenAI API key and credits
-- Verify Canvas permissions in Slack app settings
-- Look at deployment logs for errors
+### 3. Start the App
+```bash
+npm start
+```
 
-### Messages Not Being Processed
-- Ensure Paper is added to the channel
-- Check that bot has `channels:history` permission
-- Verify Socket Mode is enabled
+## 🔧 Troubleshooting
 
-### Deployment Issues
-- Confirm all environment variables are set
-- Check Vercel function logs
-- Ensure Node.js version is 18+
+### Common Issues After Debug Rollback
+
+#### "channel_not_found" Errors
+**Symptoms:**
+- `Error: An API error occurred: channel_not_found`
+- App connects but can't access channels
+
+**Solutions:**
+1. **Re-add the bot to channels** where it was working before
+2. **Check channel permissions** - the channel may have been archived/deleted
+3. **Verify bot scopes** in your Slack app configuration
+
+#### "Missing Environment Variables"
+**Symptoms:**
+- `[dotenv@16.6.0] injecting env (0) from .env`
+- App fails to start or connect
+
+**Solutions:**
+1. **Create `.env` file** with all required variables (see template above)
+2. **Get fresh tokens** from https://api.slack.com/apps
+3. **Verify token format** - Bot tokens start with `xoxb-`, App tokens with `xapp-`
+
+#### "invalid_arguments" Errors
+**Symptoms:**
+- `Error: An API error occurred: invalid_arguments`
+- App home doesn't load
+
+**Solutions:**
+1. **Check bot token scopes** - ensure all required permissions are granted
+2. **Reinstall the app** if scopes were changed
+3. **Verify user permissions** in the workspace
+
+### Required Slack App Scopes
+Your Slack app needs these OAuth scopes:
+```
+channels:read
+channels:history
+chat:write
+chat:write.public
+app_mentions:read
+canvases:write
+canvases:read
+im:write
+mpim:write
+groups:read
+groups:history
+users:read
+team:read
+```
+
+### Socket Mode Setup
+1. Go to your Slack app settings
+2. Navigate to "Socket Mode" 
+3. Enable Socket Mode
+4. Create an App-Level Token with `connections:write` scope
+5. Use this token as your `SLACK_APP_TOKEN`
+
+## 📋 App Features
+
+- **Smart Bootstrapping**: Creates Canvas from 14 days of history when joining channels
+- **Automatic Updates**: Summarizes every 10 messages or 2 minutes
+- **AI-Powered**: Uses OpenAI GPT-4 for intelligent conversation analysis
+- **Multi-Day Support**: Handles conversations with 1000+ messages
+- **Granola Format**: Professional, structured summaries with action items
+- **Error Recovery**: Graceful handling of channel access issues
+
+## 🔄 Recovery After Issues
+
+If you're experiencing issues after a debug rollback:
+
+1. **Check Environment Variables**
+   ```bash
+   # Verify your .env file exists and has values
+   cat .env
+   ```
+
+2. **Verify Slack App Status**
+   - Visit https://api.slack.com/apps
+   - Check your app's "Install App" status
+   - Regenerate tokens if needed
+
+3. **Re-add to Channels**
+   - Go to the problematic channel (e.g., `C070Y2NLDFB`)
+   - Type `/apps` and add Paper back to the channel
+   - Or use "Add to Channel" in the app directory
+
+4. **Test Connection**
+   ```bash
+   # Look for this log message on startup
+   ✅ Environment variables validated
+   ⚡️ Paper Slack app connected via Socket Mode!
+   ```
+
+5. **Monitor Logs**
+   - Watch for specific error messages
+   - `channel_not_found` = re-add bot to channel
+   - `missing_scope` = check app permissions
+   - `invalid_arguments` = verify token validity
+
+## 💡 Usage
+
+1. **Add Paper to any channel**
+2. **Have conversations naturally** (5+ messages)
+3. **Watch Canvas summaries appear automatically**
+4. **Mention `@Paper summary`** for manual updates
+
+## 🛠️ Development
+
+```bash
+# Development mode with auto-restart
+npm run dev
+
+# Production mode
+npm start
+```
+
+## 📞 Support
+
+If you continue having issues:
+1. Check the logs for specific error messages
+2. Verify all environment variables are set
+3. Ensure the bot has proper channel access
+4. Test with a simple mention: `@Paper summary`
 
 ## 📄 License
 
