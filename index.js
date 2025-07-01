@@ -1266,7 +1266,10 @@ app.error((error) => {
     // OAuth callback endpoint - handle the redirect after Slack authorization
     httpApp.get('/slack/oauth/callback', async (req, res) => {
       try {
-        console.log('🔄 OAuth callback received:', req.query);
+        console.log('🔄 OAuth callback received (GET):');
+        console.log('   Query params:', req.query);
+        console.log('   URL:', req.url);
+        console.log('   Body:', req.body);
         
         const { code, state, error } = req.query;
         
@@ -1279,11 +1282,20 @@ app.error((error) => {
           `);
         }
         
+        console.log('🔍 Extracted GET params:', { 
+          code: code ? code.substring(0, 20) + '...' : 'MISSING', 
+          state: state || 'MISSING', 
+          error: error || 'NONE' 
+        });
+        
         if (!code) {
-          console.error('❌ No authorization code received');
+          console.error('❌ No authorization code received in GET callback');
+          console.error('   Available query keys:', Object.keys(req.query));
+          console.error('   Full query object:', req.query);
           return res.status(400).send(`
             <h1>OAuth Error</h1>
             <p>No authorization code received</p>
+            <p>Query parameters: ${JSON.stringify(req.query)}</p>
             <p><a href="/install">Try installing again</a></p>
           `);
         }
@@ -1402,6 +1414,83 @@ app.error((error) => {
         `);
       } catch (error) {
         console.error('❌ Error in OAuth callback:', error);
+        res.status(500).send(`
+          <h1>OAuth Error</h1>
+          <p>Something went wrong during installation: ${error.message}</p>
+          <p><a href="/install">Try installing again</a></p>
+        `);
+      }
+    });
+
+    // Also handle POST requests to OAuth callback
+    httpApp.post('/slack/oauth/callback', async (req, res) => {
+      try {
+        console.log('🔄 OAuth callback received (POST):');
+        console.log('   Query params:', req.query);
+        console.log('   Body:', req.body);
+        console.log('   URL:', req.url);
+        
+        // Try to get parameters from both query and body
+        const params = { ...req.query, ...req.body };
+        const { code, state, error } = params;
+        
+        console.log('🔍 Extracted params:', { code: code?.substring(0, 20) + '...', state, error });
+        
+        if (error) {
+          console.error('❌ OAuth error:', error);
+          return res.status(400).send(`
+            <h1>OAuth Error</h1>
+            <p>Authorization failed: ${error}</p>
+            <p><a href="/install">Try installing again</a></p>
+          `);
+        }
+        
+        if (!code) {
+          console.error('❌ No authorization code received in POST callback');
+          return res.status(400).send(`
+            <h1>OAuth Error</h1>
+            <p>No authorization code received</p>
+            <p><a href="/install">Try installing again</a></p>
+          `);
+        }
+        
+        // Exchange code for tokens using Slack Web API
+        console.log('🔄 Exchanging authorization code for tokens (POST)...');
+        const result = await app.client.oauth.v2.access({
+          client_id: process.env.SLACK_CLIENT_ID,
+          client_secret: process.env.SLACK_CLIENT_SECRET,
+          code: code,
+          redirect_uri: process.env.SLACK_OAUTH_REDIRECT_URI || 'https://paperforslack.onrender.com/slack/oauth/callback'
+        });
+        
+        console.log('✅ OAuth token exchange successful for workspace:', result.team.name, `(${result.team.id})`);
+        
+        // Store the installation
+        const installation = {
+          team: {
+            id: result.team.id,
+            name: result.team.name
+          },
+          bot: {
+            token: result.access_token, // This is the bot token in OAuth v2
+            scopes: result.scope ? result.scope.split(',') : [],
+            userId: result.bot_user_id
+          },
+          user: {
+            token: result.authed_user?.access_token,
+            scopes: result.authed_user?.scope ? result.authed_user.scope.split(',') : [],
+            id: result.authed_user?.id
+          },
+          installedAt: new Date().toISOString()
+        };
+        
+        await installationStore.storeInstallation(installation);
+        console.log('✅ New workspace installation stored (POST):', result.team.name, `(${result.team.id})`);
+        
+        // Show success page
+        res.send(`Success! Installation completed for ${result.team.name}. You can close this window and return to Slack.`);
+      } catch (error) {
+        console.error('❌ Error in OAuth POST callback:', error);
         res.status(500).send(`
           <h1>OAuth Error</h1>
           <p>Something went wrong during installation: ${error.message}</p>
