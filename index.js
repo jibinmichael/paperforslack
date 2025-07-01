@@ -1219,11 +1219,13 @@ app.error((error) => {
           preview: process.env[key] ? process.env[key].substring(0, 10) + '...' : 'missing'
         }));
       
-      const workspaces = Array.from(installationStore.installations.entries()).map(([teamId, installation]) => ({
-        teamId,
-        teamName: installation.team?.name || 'Unknown',
-        botToken: installation.bot?.token ? installation.bot.token.substring(0, 15) + '...' : 'missing'
-      }));
+      const workspaces = isOAuthMode ? 
+        Array.from(installationStore.installations.entries()).map(([teamId, installation]) => ({
+          teamId,
+          teamName: installation.team?.name || 'Unknown',
+          botToken: installation.bot?.token ? installation.bot.token.substring(0, 15) + '...' : 'missing'
+        })) : 
+        [{ teamId: 'SINGLE_WORKSPACE', teamName: 'Token Mode', botToken: 'Using environment token' }];
       
       res.json({
         status: 'debug',
@@ -1236,19 +1238,22 @@ app.error((error) => {
         multiWorkspace: {
           totalWorkspaces: workspaces.length,
           workspaces: workspaces,
-          isMultiTenant: true
+          isMultiTenant: isOAuthMode,
+          mode: isOAuthMode ? 'OAuth Multi-Workspace' : 'Token Single-Workspace'
         }
       });
     });
     
     // Workspaces endpoint to see all installed workspaces
     httpApp.get('/workspaces', (req, res) => {
-      const workspaces = Array.from(installationStore.installations.entries()).map(([teamId, installation]) => ({
-        teamId,
-        teamName: installation.team?.name || 'Unknown',
-        installedAt: installation.installedAt || 'Unknown',
-        scopes: installation.bot?.scopes || []
-      }));
+      const workspaces = isOAuthMode ? 
+        Array.from(installationStore.installations.entries()).map(([teamId, installation]) => ({
+          teamId,
+          teamName: installation.team?.name || 'Unknown',
+          installedAt: installation.installedAt || 'Unknown',
+          scopes: installation.bot?.scopes || []
+        })) :
+        [{ teamId: 'SINGLE_WORKSPACE', teamName: 'Token Mode', installedAt: 'Environment Variable', scopes: ['Using hardcoded token'] }];
       
       res.json({
         status: 'workspaces',
@@ -1316,11 +1321,13 @@ app.error((error) => {
       `);
     });
     
-    // OAuth success callback to log installations
-    app.oauth.installationStore.storeInstallation = async (installation) => {
-      await installationStore.storeInstallation(installation);
-      console.log('✅ Paper successfully installed in workspace:', installation.team?.name, `(${installation.team?.id})`);
-    };
+    // OAuth success callback to log installations (only in OAuth mode)
+    if (isOAuthMode && app.oauth) {
+      app.oauth.installationStore.storeInstallation = async (installation) => {
+        await installationStore.storeInstallation(installation);
+        console.log('✅ Paper successfully installed in workspace:', installation.team?.name, `(${installation.team?.id})`);
+      };
+    }
     
     // Start HTTP server on the required port
     httpApp.listen(port, '0.0.0.0', () => {
