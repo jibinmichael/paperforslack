@@ -1534,7 +1534,7 @@ app.error((error) => {
       res.json({ status: 'ok', timestamp: Date.now() });
     });
 
-    // Start HTTP server early
+    // Start HTTP server for both modes
     httpApp.listen(port, '0.0.0.0', () => {
       console.log(`🌐 HTTP server running on port ${port} for Render!`);
     });
@@ -1688,6 +1688,105 @@ app.error((error) => {
 
     // OAuth installation endpoints
     if (isOAuthMode) {
+      // Use Bolt's OAuth installer
+      httpApp.get('/slack/install', app.installer?.handleInstallPath?.bind(app.installer) || ((req, res) => {
+        const clientId = process.env.SLACK_CLIENT_ID;
+        const scopes = 'channels:read,channels:history,chat:write,chat:write.public,app_mentions:read,canvases:write,canvases:read,im:write,mpim:write,groups:read,groups:history,users:read,team:read';
+        const redirectUri = `${req.protocol}://${req.get('host')}/slack/oauth_redirect`;
+        
+        const installUrl = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+        res.redirect(installUrl);
+      }));
+
+      // Use Bolt's OAuth callback
+      httpApp.get('/slack/oauth_redirect', app.installer?.handleCallback?.bind(app.installer) || (async (req, res) => {
+        try {
+          const { code, state } = req.query;
+          
+          if (!code) {
+            return res.status(400).send('Missing authorization code');
+          }
+
+          // Exchange code for tokens
+          const { WebClient } = require('@slack/web-api');
+          const oauthClient = new WebClient();
+          
+          const result = await oauthClient.oauth.v2.access({
+            client_id: process.env.SLACK_CLIENT_ID,
+            client_secret: process.env.SLACK_CLIENT_SECRET,
+            code: code,
+            redirect_uri: `${req.protocol}://${req.get('host')}/slack/oauth_redirect`
+          });
+
+          if (result.ok) {
+            // Store installation
+            await installationStore.storeInstallation({
+              team: { id: result.team.id, name: result.team.name },
+              bot: {
+                token: result.access_token,
+                scopes: result.scope?.split(',') || [],
+                id: result.bot_user_id,
+                userId: result.bot_user_id
+              },
+              user: { 
+                token: result.authed_user?.access_token || result.access_token, 
+                id: result.authed_user?.id 
+              },
+              appId: result.app_id,
+              installedAt: new Date().toISOString()
+            });
+
+            // Success page
+            res.send(`
+              <!DOCTYPE html>
+              <html>
+                <head>
+                  <title>Paper for Slack - Success!</title>
+                  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+                  <style>
+                    * { margin: 0; padding: 0; box-sizing: border-box; }
+                    body { 
+                      font-family: 'DM Sans', sans-serif;
+                      background: #f5f5f7;
+                      min-height: 100vh;
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      padding: 20px;
+                      color: #1d1d1f;
+                    }
+                    .container { 
+                      max-width: 480px;
+                      background: #ffffff;
+                      padding: 48px 40px;
+                      border-radius: 18px;
+                      text-align: center;
+                      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+                    }
+                    .success { font-size: 64px; margin-bottom: 24px; }
+                    h1 { font-size: 28px; font-weight: 700; margin-bottom: 16px; }
+                    p { font-size: 18px; color: #6e6e73; line-height: 1.5; }
+                  </style>
+                </head>
+                <body>
+                  <div class="container">
+                    <div class="success">🎉</div>
+                    <h1>Paper Installed Successfully!</h1>
+                    <p>Paper is now ready to create Canvas summaries in your workspace. Add me to any channel and start having conversations!</p>
+                  </div>
+                </body>
+              </html>
+            `);
+          } else {
+            res.status(400).send('OAuth installation failed');
+          }
+        } catch (error) {
+          console.error('OAuth callback error:', error);
+          res.status(500).send('Installation failed');
+        }
+      }));
+      
       // OAuth mode - serve installation flow
       httpApp.get('/install', (req, res) => {
         res.send(`
@@ -1804,50 +1903,7 @@ app.error((error) => {
         `);
       });
 
-      // OAuth success page
-      httpApp.get('/slack/oauth_redirect', (req, res) => {
-        res.send(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>Paper for Slack - Success!</title>
-              <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-              <style>
-                * { margin: 0; padding: 0; box-sizing: border-box; }
-                body { 
-                  font-family: 'DM Sans', sans-serif;
-                  background: #f5f5f7;
-                  min-height: 100vh;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  padding: 20px;
-                  color: #1d1d1f;
-                }
-                .container { 
-                  max-width: 480px;
-                  background: #ffffff;
-                  padding: 48px 40px;
-                  border-radius: 18px;
-                  text-align: center;
-                  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
-                }
-                .success { font-size: 64px; margin-bottom: 24px; }
-                h1 { font-size: 28px; font-weight: 700; margin-bottom: 16px; }
-                p { font-size: 18px; color: #6e6e73; line-height: 1.5; }
-              </style>
-            </head>
-            <body>
-              <div class="container">
-                <div class="success">🎉</div>
-                <h1>Paper Installed Successfully!</h1>
-                <p>Paper is now ready to create Canvas summaries in your workspace. Add me to any channel and start having conversations!</p>
-              </div>
-            </body>
-          </html>
-        `);
-      });
+      
     } else {
       // Token mode - simple info page
       httpApp.get('/install', (req, res) => {
