@@ -106,111 +106,21 @@ const installationStore = {
   }
 };
 
-// Initialize Slack app with conditional OAuth support - TEMPORARILY FORCE TOKEN MODE
-const hasOAuthCreds = false; // Temporarily disable OAuth to fix Socket Mode issues
-// const hasOAuthCreds = process.env.SLACK_CLIENT_ID && process.env.SLACK_CLIENT_SECRET && 
-//                     process.env.SLACK_CLIENT_ID.trim() !== '' && process.env.SLACK_CLIENT_SECRET.trim() !== '';
+// Simple token-only configuration (like before OAuth complexity)
+const appConfig = {
+  token: process.env.SLACK_BOT_TOKEN,
+  signingSecret: process.env.SLACK_SIGNING_SECRET,
+  socketMode: true,
+  appToken: process.env.SLACK_APP_TOKEN,
+  port: process.env.PORT || 10000,
+};
 
-console.log('🔍 OAuth Credential Check:');
-console.log(`   SLACK_CLIENT_ID: ${process.env.SLACK_CLIENT_ID ? `${process.env.SLACK_CLIENT_ID.substring(0, 10)}...` : 'NOT SET'}`);
-console.log(`   SLACK_CLIENT_SECRET: ${process.env.SLACK_CLIENT_SECRET ? `${process.env.SLACK_CLIENT_SECRET.substring(0, 10)}...` : 'NOT SET'}`);
-console.log(`   Valid OAuth credentials: ${hasOAuthCreds}`);
-console.log('🚨 FORCING TOKEN MODE FOR SOCKET MODE DEBUGGING');
+console.log('🔧 Using simple token-only configuration (back to basics)');
 
-console.log(`🔧 App Configuration Mode: ${hasOAuthCreds ? 'Multi-Workspace OAuth' : 'Single-Workspace Token'}`);
-if (hasOAuthCreds) {
-  console.log('✅ OAuth credentials detected - enabling multi-workspace support');
-} else {
-  console.log('⚠️ Using single-workspace token mode for debugging');
-  console.log('   OAuth temporarily disabled to fix Socket Mode connection issues');
-}
-
-// Build app configuration based on mode
-let appConfig;
-
-if (hasOAuthCreds) {
-  // OAuth mode configuration
-  appConfig = {
-    signingSecret: process.env.SLACK_SIGNING_SECRET,
-    socketMode: true,
-    appToken: process.env.SLACK_APP_TOKEN,
-    port: process.env.PORT || 10000,
-    installationStore: installationStore,
-    oauth: {
-      clientId: process.env.SLACK_CLIENT_ID,
-      clientSecret: process.env.SLACK_CLIENT_SECRET,
-      stateSecret: 'paper-oauth-state-secret-key',
-      redirectUri: process.env.SLACK_OAUTH_REDIRECT_URI || 'https://paperforslack.onrender.com/slack/oauth/callback'
-    },
-    // Add authorize function for OAuth mode
-    authorize: async (source, body) => {
-      const teamId = source.teamId;
-      console.log('🔍 Authorizing request for team:', teamId);
-      
-      const installation = await installationStore.fetchInstallation({
-        teamId: teamId,
-      });
-      
-      if (installation) {
-        console.log('🔍 Using bot token for API call:', installation.bot.token ? installation.bot.token.substring(0, 15) + '...' : 'MISSING');
-        return {
-          botToken: installation.bot.token,
-          botId: installation.bot.userId,
-          botUserId: installation.bot.userId,
-        };
-      }
-      
-      console.log('❌ No installation found for workspace:', teamId);
-      throw new Error(`No installation found for team ${teamId}`);
-    }
-  };
-} else {
-  // Pure token mode configuration (no OAuth at all)
-  appConfig = {
-    token: process.env.SLACK_BOT_TOKEN,
-    signingSecret: process.env.SLACK_SIGNING_SECRET,
-    socketMode: true,
-    appToken: process.env.SLACK_APP_TOKEN,
-    port: process.env.PORT || 10000,
-  };
-  console.log('🔧 Token mode: Using pure token configuration (no OAuth components)');
-}
-
-// Initialize App with automatic fallback to token mode if OAuth fails
-let app;
-let isOAuthMode = false;
-
-try {
-  console.log('🚀 Attempting to initialize Slack App...');
-  app = new App(appConfig);
-  isOAuthMode = hasOAuthCreds; // Track if we're actually in OAuth mode
-  console.log('✅ Slack App initialized successfully');
-} catch (error) {
-  if (hasOAuthCreds && error.code === 'slack_bolt_app_initialization_error') {
-    console.log('❌ OAuth initialization failed, falling back to token mode...');
-    console.log('   Error:', error.message);
-    console.log('🔄 Retrying with single-workspace token configuration...');
-    
-    // Fallback to token mode
-    const tokenConfig = {
-      token: process.env.SLACK_BOT_TOKEN,
-      signingSecret: process.env.SLACK_SIGNING_SECRET,
-      socketMode: true,
-      appToken: process.env.SLACK_APP_TOKEN,
-      port: process.env.PORT || 10000,
-    };
-    
-    app = new App(tokenConfig);
-    isOAuthMode = false; // We fell back to token mode
-    console.log('✅ Slack App initialized in token mode (single-workspace)');
-  } else {
-    console.error('❌ Failed to initialize Slack App:', error);
-    throw error; // Re-throw if it's not an OAuth issue
-  }
-}
-
-// No workspace migration needed in token mode
-console.log('ℹ️ Token mode - no workspace migration required');
+// Simple app initialization (like before)
+console.log('🚀 Initializing Slack App...');
+const app = new App(appConfig);
+console.log('✅ Slack App initialized successfully');
 
 // In-memory storage for message batching and canvas tracking
 const channelData = new Map();
@@ -825,140 +735,109 @@ async function updateCanvasWithClient(channelId, summaryData, client, teamId) {
   }
 }
 
-// Create or update summary using Canvas API (fallback for legacy calls)
+// Create or update summary using Canvas API (simple token mode)
 async function updateCanvas(channelId, summaryData) {
   try {
-    // Get workspace-specific client in OAuth mode
-    let client, teamId;
-    if (isOAuthMode) {
-      // Get channel info to determine team ID
-      let channelInfo;
-      try {
-        channelInfo = await app.client.conversations.info({ channel: channelId });
-      } catch (error) {
-        console.error(`❌ Cannot get channel info for canvas update: ${error.message}`);
-        return;
+    const client = app.client;
+    
+    // First check if we have a stored canvas ID
+    let canvasId = canvasData.get(channelId);
+    
+    // If not, check if channel already has a canvas
+    if (!canvasId) {
+      canvasId = await getExistingCanvasId(channelId);
+      if (canvasId === 'CHANNEL_INACCESSIBLE') {
+        console.log(`🚫 Skipping inaccessible channel: ${channelId}`);
+        return; // Exit early for inaccessible channels
       }
-      
-      teamId = channelInfo.channel?.shared_team_ids?.[0] || 'UNKNOWN';
-      console.log(`🔍 Canvas update: Getting installation for team ${teamId}`);
-      
-      const installation = await installationStore.fetchInstallation({ teamId });
-      if (!installation) {
-        console.error(`❌ No installation found for team ${teamId} during canvas update`);
-        return;
-      }
-      
-      // Create WebClient with workspace-specific token
-      const { WebClient } = require('@slack/web-api');
-      client = new WebClient(installation.bot.token);
-      console.log(`🔍 Canvas update: Using workspace token ${installation.bot.token.substring(0, 15)}...`);
-      
-      // Use multi-workspace canvas update function
-      await updateCanvasWithClient(channelId, summaryData, client, teamId);
-    } else {
-      // Use single-workspace logic with global client
-      client = app.client;
-      
-      // First check if we have a stored canvas ID
-      let canvasId = canvasData.get(channelId);
-      
-      // If not, check if channel already has a canvas
-      if (!canvasId) {
-        canvasId = await getExistingCanvasId(channelId);
-        if (canvasId === 'CHANNEL_INACCESSIBLE') {
-          console.log(`🚫 Skipping inaccessible channel: ${channelId}`);
-          return; // Exit early for inaccessible channels
-        }
-        if (canvasId) {
-          canvasData.set(channelId, canvasId);
-          console.log('📄 Found existing canvas for channel:', channelId, 'Canvas ID:', canvasId);
-        }
-      }
-      
-      const canvasContent = await createCanvasContent(summaryData);
-      const canvasTitle = await generateCanvasTitle(summaryData);
-      
-      if (!canvasId) {
-        // Create new channel canvas using the correct API
-        console.log('🎨 Creating new channel canvas:', channelId);
-        
-        const response = await client.apiCall('conversations.canvases.create', {
-          channel_id: channelId,
-          title: canvasTitle,
-          document_content: {
-            type: "markdown",
-            markdown: canvasContent
-          }
-        });
-        
-        canvasId = response.canvas_id;
+      if (canvasId) {
         canvasData.set(channelId, canvasId);
-        
-        console.log(`✅ Channel Canvas created successfully: ${canvasId}`);
-        
-        // Get workspace info for Canvas link (with fallback for missing team:read scope)
-        let canvasUrl = `https://slack.com/canvas/${canvasId}`; // Generic fallback
-        try {
-          const teamInfo = await client.team.info();
-          const workspaceUrl = `https://${teamInfo.team.domain}.slack.com`;
-          canvasUrl = `${workspaceUrl}/docs/${teamInfo.team.id}/${canvasId}`;
-        } catch (error) {
-          console.log(`⚠️ Cannot fetch team info (missing team:read scope), using generic Canvas URL`);
+        console.log('📄 Found existing canvas for channel:', channelId, 'Canvas ID:', canvasId);
+      }
+    }
+    
+    const canvasContent = await createCanvasContent(summaryData);
+    const canvasTitle = await generateCanvasTitle(summaryData);
+    
+    if (!canvasId) {
+      // Create new channel canvas using the correct API
+      console.log('🎨 Creating new channel canvas:', channelId);
+      
+      const response = await client.apiCall('conversations.canvases.create', {
+        channel_id: channelId,
+        title: canvasTitle,
+        document_content: {
+          type: "markdown",
+          markdown: canvasContent
         }
-        
-        // Clean Canvas creation notification
-        await client.chat.postMessage({
-          channel: channelId,
-          text: `📄 <${canvasUrl}|${canvasTitle}>`,
-          blocks: [
-            {
-              type: "section",
-              text: {
-                type: "mrkdwn",
-                text: `📄 <${canvasUrl}|${canvasTitle}> ✨`
-              }
+      });
+      
+      canvasId = response.canvas_id;
+      canvasData.set(channelId, canvasId);
+      
+      console.log(`✅ Channel Canvas created successfully: ${canvasId}`);
+      
+      // Get workspace info for Canvas link (with fallback for missing team:read scope)
+      let canvasUrl = `https://slack.com/canvas/${canvasId}`; // Generic fallback
+      try {
+        const teamInfo = await client.team.info();
+        const workspaceUrl = `https://${teamInfo.team.domain}.slack.com`;
+        canvasUrl = `${workspaceUrl}/docs/${teamInfo.team.id}/${canvasId}`;
+      } catch (error) {
+        console.log(`⚠️ Cannot fetch team info (missing team:read scope), using generic Canvas URL`);
+      }
+      
+      // Clean Canvas creation notification
+      await client.chat.postMessage({
+        channel: channelId,
+        text: `📄 <${canvasUrl}|${canvasTitle}>`,
+        blocks: [
+          {
+            type: "section",
+            text: {
+              type: "mrkdwn",
+              text: `📄 <${canvasUrl}|${canvasTitle}> ✨`
             }
-          ],
-          unfurl_links: true,
-          unfurl_media: true
-        });
-      } else {
-        // Update existing canvas with enhanced content
-        console.log('🔄 Updating existing canvas:', canvasId);
-        
-        // Update canvas content and title
+          }
+        ],
+        unfurl_links: true,
+        unfurl_media: true
+      });
+    } else {
+      // Update existing canvas with enhanced content
+      console.log('🔄 Updating existing canvas:', canvasId);
+      
+      // Update canvas content and title
+      await client.apiCall('canvases.edit', {
+        canvas_id: canvasId,
+        changes: [
+          {
+            operation: "replace",
+            document_content: {
+              type: "markdown", 
+              markdown: canvasContent
+            }
+          }
+        ]
+      });
+      
+      // Also update the title dynamically
+      try {
         await client.apiCall('canvases.edit', {
           canvas_id: canvasId,
           changes: [
             {
               operation: "replace",
-              document_content: {
-                type: "markdown", 
-                markdown: canvasContent
-              }
+              title: canvasTitle
             }
           ]
         });
-        
-        // Also update the title dynamically
-        try {
-          await client.apiCall('canvases.edit', {
-            canvas_id: canvasId,
-            changes: [
-              {
-                operation: "replace",
-                title: canvasTitle
-              }
-            ]
-          });
-          console.log(`📝 Canvas title updated to: ${canvasTitle}`);
-        } catch (titleError) {
-          console.log('📝 Canvas title update not supported by API, keeping original title');
-        }
-        
-        console.log(`✅ Canvas updated successfully: ${canvasId}`);
+        console.log(`📝 Canvas title updated to: ${canvasTitle}`);
+      } catch (titleError) {
+        console.log('📝 Canvas title update not supported by API, keeping original title');
       }
+      
+      console.log(`✅ Canvas updated successfully: ${canvasId}`);
     }
   } catch (error) {
     if (error.data?.error === 'channel_not_found') {
@@ -972,25 +851,9 @@ async function updateCanvas(channelId, summaryData) {
     
     console.error('❌ Canvas API error:', error);
     
-    // Enhanced fallback with better formatting
+    // Simple fallback message
     try {
-      // Use workspace-specific client for fallback too
-      let fallbackClient = app.client;
-      if (isOAuthMode) {
-        try {
-          const channelInfo = await app.client.conversations.info({ channel: channelId });
-          const teamId = channelInfo.channel?.shared_team_ids?.[0] || 'UNKNOWN';
-          const installation = await installationStore.fetchInstallation({ teamId });
-          if (installation) {
-            const { WebClient } = require('@slack/web-api');
-            fallbackClient = new WebClient(installation.bot.token);
-          }
-        } catch (fallbackClientError) {
-          console.log('Using global client for fallback message');
-        }
-      }
-      
-      await fallbackClient.chat.postMessage({
+      await client.chat.postMessage({
         channel: channelId,
         text: "📄 *Paper: Conversation Summary*",
         blocks: [
@@ -1047,33 +910,7 @@ async function bootstrapChannelCanvas(channelId, say = null) {
   try {
     console.log(`🎯 Bootstrapping Canvas for channel: ${channelId}`);
     
-    // Get workspace-specific client in OAuth mode
-    let client;
-    if (isOAuthMode) {
-      // Get channel info to determine team ID
-      const channelInfo = await app.client.conversations.info({ channel: channelId });
-      const teamId = channelInfo.channel?.shared_team_ids?.[0] || 'UNKNOWN';
-      
-      console.log(`🔍 Bootstrap: Getting installation for team ${teamId}`);
-      const installation = await installationStore.fetchInstallation({ teamId });
-      
-      if (!installation) {
-        console.error(`❌ No installation found for team ${teamId} during bootstrap`);
-        bootstrappedChannels.add(channelId);
-        if (say) {
-          await say("📄 Hi! I need to be properly installed in this workspace. Please reinstall Paper! 🔧");
-        }
-        return;
-      }
-      
-      // Create WebClient with workspace-specific token
-      const { WebClient } = require('@slack/web-api');
-      client = new WebClient(installation.bot.token);
-      console.log(`🔍 Bootstrap: Using workspace token ${installation.bot.token.substring(0, 15)}...`);
-    } else {
-      // Use global client in token mode
-      client = app.client;
-    }
+    const client = app.client;
     
     // Calculate 14 days ago timestamp
     const fourteenDaysAgo = Math.floor((Date.now() - (CONFIG.BOOTSTRAP_DAYS_LOOKBACK * 24 * 60 * 60 * 1000)) / 1000);
@@ -1205,7 +1042,7 @@ async function processBatch(channelId) {
 }
 
 // Handle when bot is added to a channel
-app.event('member_joined_channel', async ({ event, say, client, body }) => {
+app.event('member_joined_channel', async ({ event, say, client }) => {
   try {
     console.log(`👥 Member joined channel event:`, event);
     
@@ -1218,15 +1055,14 @@ app.event('member_joined_channel', async ({ event, say, client, body }) => {
     // Get bot user ID to compare
     const botInfo = await client.auth.test();
     const botUserId = botInfo.user_id;
-    const teamId = body.team_id || event.team;
     
     // Only trigger bootstrap if the bot itself joined the channel
     if (event.user === botUserId) {
-      console.log(`🎯 Paper bot added to channel: ${event.channel} in team ${teamId}, starting bootstrap...`);
+      console.log(`🎯 Paper bot added to channel: ${event.channel}, starting bootstrap...`);
       
       // Small delay to ensure permissions are fully set up
       setTimeout(async () => {
-        await bootstrapChannelCanvasWithClient(event.channel, client, teamId, say);
+        await bootstrapChannelCanvas(event.channel, say);
       }, 2000);
     }
   } catch (error) {
@@ -1257,37 +1093,7 @@ app.message(async ({ message, say }) => {
     // Bootstrap in background, don't block message processing
     setTimeout(async () => {
       try {
-        // Get workspace-specific client in OAuth mode
-        if (isOAuthMode) {
-          // Get channel info to determine team ID
-          let channelInfo;
-          try {
-            channelInfo = await app.client.conversations.info({ channel: channelId });
-          } catch (error) {
-            console.error(`❌ Cannot get channel info for bootstrap: ${error.message}`);
-            return;
-          }
-          
-          const teamId = channelInfo.channel?.shared_team_ids?.[0] || 'UNKNOWN';
-          console.log(`🔍 Bootstrap: Getting installation for team ${teamId}`);
-          
-          const installation = await installationStore.fetchInstallation({ teamId });
-          if (!installation) {
-            console.error(`❌ No installation found for team ${teamId} during bootstrap`);
-            return;
-          }
-          
-          // Create WebClient with workspace-specific token
-          const { WebClient } = require('@slack/web-api');
-          const client = new WebClient(installation.bot.token);
-          console.log(`🔍 Bootstrap: Using workspace token ${installation.bot.token.substring(0, 15)}...`);
-          
-          // Use multi-workspace bootstrap function
-          await bootstrapChannelCanvasWithClient(channelId, client, teamId);
-        } else {
-          // Use single-workspace bootstrap function in token mode
-          await bootstrapChannelCanvas(channelId);
-        }
+        await bootstrapChannelCanvas(channelId);
       } catch (error) {
         console.error(`❌ Error bootstrapping channel ${channelId}:`, error);
       }
@@ -1325,71 +1131,13 @@ app.event('app_mention', async ({ event, say }) => {
       // Bootstrap check: If not bootstrapped yet, do it now
       if (!bootstrappedChannels.has(channelId)) {
         console.log(`🎯 Manual summary requested in unboostrapped channel ${channelId}, bootstrapping first...`);
-        
-        // Get workspace-specific client for bootstrap in OAuth mode
-        if (isOAuthMode) {
-          // Get channel info to determine team ID
-          let channelInfo;
-          try {
-            channelInfo = await app.client.conversations.info({ channel: channelId });
-          } catch (error) {
-            console.error(`❌ Cannot get channel info for manual bootstrap: ${error.message}`);
-            await say("📄 Hi! I had trouble accessing this channel. Please try again! 🔧");
-            return;
-          }
-          
-          const teamId = channelInfo.channel?.shared_team_ids?.[0] || 'UNKNOWN';
-          console.log(`🔍 Manual bootstrap: Getting installation for team ${teamId}`);
-          
-          const installation = await installationStore.fetchInstallation({ teamId });
-          if (!installation) {
-            console.error(`❌ No installation found for team ${teamId} during manual bootstrap`);
-            await say("📄 Hi! I need to be properly installed in this workspace. Please reinstall Paper! 🔧");
-            return;
-          }
-          
-          // Create WebClient with workspace-specific token
-          const { WebClient } = require('@slack/web-api');
-          const client = new WebClient(installation.bot.token);
-          console.log(`🔍 Manual bootstrap: Using workspace token ${installation.bot.token.substring(0, 15)}...`);
-          
-          // Use multi-workspace bootstrap function
-          await bootstrapChannelCanvasWithClient(channelId, client, teamId, say);
-        } else {
-          // Use single-workspace bootstrap function in token mode
-          await bootstrapChannelCanvas(channelId, say);
-        }
+        await bootstrapChannelCanvas(channelId, say);
         return; // Bootstrap will create the Canvas
       }
       
-      // Fetch recent conversation history from Slack with error handling
+      // Fetch recent conversation history from Slack
       console.log('Fetching conversation history for channel:', channelId);
-      
-      // Get workspace-specific client in OAuth mode
-      let client;
-      if (isOAuthMode) {
-        // Get channel info to determine team ID
-        const channelInfo = await app.client.conversations.info({ channel: channelId });
-        const teamId = channelInfo.channel?.shared_team_ids?.[0] || 'UNKNOWN';
-        
-        console.log(`🔍 Manual summary: Getting installation for team ${teamId}`);
-        const installation = await installationStore.fetchInstallation({ teamId });
-        
-        if (!installation) {
-          console.error(`❌ No installation found for team ${teamId} during manual summary`);
-          await say("📄 Hi! I need to be properly installed in this workspace. Please reinstall Paper! 🔧");
-          return;
-        }
-        
-        // Create WebClient with workspace-specific token
-        const { WebClient } = require('@slack/web-api');
-        client = new WebClient(installation.bot.token);
-        console.log(`🔍 Manual summary: Using workspace token ${installation.bot.token.substring(0, 15)}...`);
-      } else {
-        // Use global client in token mode (bypass OAuth authorization)
-        console.log(`🔍 Manual summary: Using token mode with environment bot token`);
-        client = app.client;
-      }
+      const client = app.client;
       
       let result;
       try {
