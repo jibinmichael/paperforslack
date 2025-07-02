@@ -675,9 +675,13 @@ app.error((error) => {
     httpApp.get('/slack/install', app.installer?.handleInstallPath?.bind(app.installer) || ((req, res) => {
       const clientId = process.env.SLACK_CLIENT_ID;
       const scopes = encodeURIComponent('channels:read,channels:history,chat:write,chat:write.public,app_mentions:read,canvases:write,canvases:read,users:read,team:read,groups:read,groups:history,im:write,mpim:write');
-      const redirectUri = encodeURIComponent(`${req.protocol}://${req.get('host')}/slack/oauth_redirect`);
+      
+      // Force HTTPS for production (Render always serves over HTTPS)
+      const protocol = process.env.NODE_ENV === 'production' ? 'https' : req.protocol;
+      const redirectUri = encodeURIComponent(`${protocol}://${req.get('host')}/slack/oauth_redirect`);
       
       const installUrl = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${scopes}&redirect_uri=${redirectUri}`;
+      console.log(`🔗 OAuth install URL: ${installUrl}`);
       res.redirect(installUrl);
     }));
 
@@ -727,11 +731,17 @@ app.error((error) => {
         const { WebClient } = require('@slack/web-api');
         const oauthClient = new WebClient();
         
+        // Force HTTPS for production (Render always serves over HTTPS)
+        const protocol = process.env.NODE_ENV === 'production' ? 'https' : req.protocol;
+        const redirectUri = `${protocol}://${req.get('host')}/slack/oauth_redirect`;
+        
+        console.log(`🔗 Using redirect URI: ${redirectUri}`);
+        
         const result = await oauthClient.oauth.v2.access({
           client_id: process.env.SLACK_CLIENT_ID,
           client_secret: process.env.SLACK_CLIENT_SECRET,
           code: code,
-          redirect_uri: `${req.protocol}://${req.get('host')}/slack/oauth_redirect`
+          redirect_uri: redirectUri
         });
 
         if (result.ok) {
