@@ -290,12 +290,14 @@ ${summaryData.summary.substring(0, 500)}...`;
   }
 }
 
-// Workspace data storage
+// Workspace data storage with concurrency protection
 const workspaceData = new Map(); // teamId -> { channels: Map(channelId -> data) }
+const processingLocks = new Map(); // channelId -> Promise (prevents race conditions)
 
 function getWorkspaceData(teamId) {
   if (!workspaceData.has(teamId)) {
     workspaceData.set(teamId, { channels: new Map() });
+    console.log(`🏢 Initialized workspace data for team: ${teamId}`);
   }
   return workspaceData.get(teamId);
 }
@@ -306,107 +308,226 @@ function getChannelData(teamId, channelId) {
     workspace.channels.set(channelId, {
       messages: [],
       canvasId: null,
-      lastUpdate: Date.now()
+      lastUpdate: Date.now(),
+      processing: false
     });
+    console.log(`📺 Initialized channel data: ${teamId}/${channelId}`);
   }
   return workspace.channels.get(channelId);
 }
 
-// Create or update Canvas
-async function updateCanvas(teamId, channelId, summaryData) {
+// Check if canvas already exists for this channel
+async function getExistingCanvasId(teamId, channelId) {
   try {
     const client = await getWorkspaceClient(teamId);
-    if (!client) return;
+    if (!client) return null;
 
-    const channelData = getChannelData(teamId, channelId);
-    const canvasContent = createCanvasContent(summaryData);
-    const canvasTitle = await generateCanvasTitle(summaryData);
-
-    if (!channelData.canvasId) {
-      // Create new Canvas
-      console.log(`🎨 Creating Canvas for ${teamId}/${channelId}`);
+    const channelInfo = await client.conversations.info({
+      channel: channelId,
+      include_locale: false
+    });
+    
+    if (channelInfo.channel.properties?.canvas?.document_id) {
+      const existingCanvasId = channelInfo.channel.properties.canvas.document_id;
+      console.log(`📄 Found existing canvas: ${existingCanvasId} for ${teamId}/${channelId}`);
       
-      const response = await client.apiCall('conversations.canvases.create', {
-        channel_id: channelId,
-        title: canvasTitle,
-        document_content: {
-          type: 'markdown',
-          markdown: canvasContent
-        }
-      });
+      // Update our local cache
+      const channelData = getChannelData(teamId, channelId);
+      channelData.canvasId = existingCanvasId;
+      
+      return existingCanvasId;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error(`❌ Error checking existing canvas for ${teamId}/${channelId}:`, error.message);
+    return null;
+  }
+}
 
-      if (response.ok) {
-        channelData.canvasId = response.canvas_id;
-        console.log(`✅ Canvas created: ${response.canvas_id}`);
+// Create or update Canvas with race condition protection
+async function updateCanvas(teamId, channelId, summaryData) {
+  const lockKey = `${teamId}/${channelId}`;
+  
+  // Prevent concurrent canvas operations for same channel
+  if (processingLocks.has(lockKey)) {
+    console.log(`⏳ Canvas operation already in progress for ${lockKey}, skipping`);
+    return;
+  }
+  
+  try {
+    // Set processing lock
+    const lockPromise = (async () => {
+      const client = await getWorkspaceClient(teamId);
+      if (!client) {
+        console.error(`❌ No client available for team: ${teamId}`);
+        return;
       }
-    } else {
-      // Update existing Canvas
-      console.log(`📝 Updating Canvas: ${channelData.canvasId}`);
+
+      const channelData = getChannelData(teamId, channelId);
       
-      await client.apiCall('canvases.edit', {
-        canvas_id: channelData.canvasId,
-        changes: [{
-          operation: 'replace',
+      // Check if canvas already exists (both locally and in Slack)
+      if (!channelData.canvasId) {
+        channelData.canvasId = await getExistingCanvasId(teamId, channelId);
+      }
+
+      const canvasContent = createCanvasContent(summaryData);
+      const canvasTitle = await generateCanvasTitle(summaryData);
+
+      if (!channelData.canvasId) {
+        // Create new Canvas
+        console.log(`🎨 Creating NEW Canvas for ${teamId}/${channelId}`);
+        
+        const response = await client.apiCall('conversations.canvases.create', {
+          channel_id: channelId,
+          title: canvasTitle,
           document_content: {
             type: 'markdown',
             markdown: canvasContent
           }
-        }]
-      });
-      
-      console.log(`✅ Canvas updated: ${channelData.canvasId}`);
-    }
+        });
 
-    channelData.lastUpdate = Date.now();
+        if (response.ok) {
+          channelData.canvasId = response.canvas_id;
+          console.log(`✅ Canvas created successfully: ${response.canvas_id}`);
+        } else {
+          console.error(`❌ Failed to create canvas:`, response.error);
+        }
+      } else {
+        // Update existing Canvas
+        console.log(`📝 Updating EXISTING Canvas: ${channelData.canvasId} for ${teamId}/${channelId}`);
+        
+        const response = await client.apiCall('canvases.edit', {
+          canvas_id: channelData.canvasId,
+          changes: [{
+            operation: 'replace',
+            document_content: {
+              type: 'markdown',
+              markdown: canvasContent
+            }
+          }]
+        });
+        
+        if (response.ok) {
+          console.log(`✅ Canvas updated successfully: ${channelData.canvasId}`);
+        } else {
+          console.error(`❌ Failed to update canvas:`, response.error);
+        }
+      }
+
+      channelData.lastUpdate = Date.now();
+    })();
+    
+    processingLocks.set(lockKey, lockPromise);
+    await lockPromise;
+    
   } catch (error) {
     console.error(`❌ Canvas error for ${teamId}/${channelId}:`, error.message);
+  } finally {
+    // Always clear the lock
+    processingLocks.delete(lockKey);
   }
 }
 
-// Process messages and create summary
+// Process messages and create summary with concurrency protection
 async function processMessages(teamId, channelId) {
+  const lockKey = `${teamId}/${channelId}`;
+  
   try {
     const channelData = getChannelData(teamId, channelId);
+    
+    // Prevent concurrent processing
+    if (channelData.processing) {
+      console.log(`⏳ Already processing messages for ${teamId}/${channelId}, skipping`);
+      return;
+    }
     
     if (channelData.messages.length < 3) {
       console.log(`📝 Channel ${channelId} has only ${channelData.messages.length} messages, need at least 3`);
       return;
     }
 
+    // Set processing flag
+    channelData.processing = true;
     console.log(`📊 Processing ${channelData.messages.length} messages for ${teamId}/${channelId}`);
     
     const client = await getWorkspaceClient(teamId);
-    if (!client) return;
+    if (!client) {
+      console.error(`❌ No client available for team: ${teamId}`);
+      return;
+    }
 
-    const summaryData = await generateSummary(channelData.messages, client);
+    // Create a copy of messages to process
+    const messagesToProcess = [...channelData.messages];
+    
+    const summaryData = await generateSummary(messagesToProcess, client);
     await updateCanvas(teamId, channelId, summaryData);
 
-    // Clear processed messages
-    channelData.messages = [];
+    // Clear processed messages only if no new ones arrived during processing
+    if (channelData.messages.length === messagesToProcess.length) {
+      channelData.messages = [];
+      console.log(`🧹 Cleared ${messagesToProcess.length} processed messages for ${teamId}/${channelId}`);
+    } else {
+      // Keep newer messages that arrived during processing
+      channelData.messages = channelData.messages.slice(messagesToProcess.length);
+      console.log(`🔄 Kept ${channelData.messages.length} new messages that arrived during processing`);
+    }
+    
   } catch (error) {
     console.error(`❌ Error processing messages for ${teamId}/${channelId}:`, error.message);
+  } finally {
+    // Always clear processing flag
+    const channelData = getChannelData(teamId, channelId);
+    channelData.processing = false;
   }
 }
 
-// Extract team ID from context
-function getTeamId(context) {
-  return context.teamId || context.team_id || context.team || null;
+// Extract team ID from context - enhanced for all event types
+function getTeamId(context, event = null) {
+  // Priority order: context first, then event, then nested properties
+  const candidates = [
+    context?.teamId,
+    context?.team_id, 
+    context?.team,
+    event?.team_id,
+    event?.team,
+    context?.body?.team_id,
+    context?.payload?.team_id,
+    context?.envelope?.team_id
+  ];
+  
+  const teamId = candidates.find(id => id && typeof id === 'string');
+  
+  if (!teamId) {
+    console.error('🚨 No team ID found in context:', {
+      contextKeys: Object.keys(context || {}),
+      eventKeys: Object.keys(event || {}),
+      contextValues: context,
+      eventValues: event
+    });
+  } else {
+    console.log(`🔍 Team ID extracted: ${teamId}`);
+  }
+  
+  return teamId;
 }
 
-// Message handler
+// Message handler with enhanced team ID extraction
 app.message(async ({ message, context }) => {
   try {
     if (message.subtype || message.bot_id) return;
 
-    const teamId = getTeamId(context);
+    const teamId = getTeamId(context, message);
     const channelId = message.channel;
 
     if (!teamId) {
-      console.log('⚠️ No team ID found in message context');
+      console.error('🚨 CRITICAL: No team ID found in message - multi-tenant will fail');
+      console.error('Context keys:', Object.keys(context || {}));
+      console.error('Message keys:', Object.keys(message || {}));
       return;
     }
 
-    console.log(`💬 Message in ${teamId}/${channelId}`);
+    console.log(`💬 Message received: ${teamId}/${channelId} from user ${message.user}`);
 
     const channelData = getChannelData(teamId, channelId);
     channelData.messages.push({
@@ -417,14 +538,18 @@ app.message(async ({ message, context }) => {
 
     // Keep only last 100 messages per channel
     if (channelData.messages.length > 100) {
+      const removedCount = channelData.messages.length - 100;
       channelData.messages = channelData.messages.slice(-100);
+      console.log(`🧹 Trimmed ${removedCount} old messages, keeping last 100`);
     }
 
     // Process every 10 messages or after 2 minutes
+    const timeSinceLastUpdate = Date.now() - channelData.lastUpdate;
     const shouldProcess = channelData.messages.length >= 10 || 
-                         (Date.now() - channelData.lastUpdate) > (2 * 60 * 1000);
+                         timeSinceLastUpdate > (2 * 60 * 1000);
 
-    if (shouldProcess) {
+    if (shouldProcess && !channelData.processing) {
+      console.log(`🎯 Triggering processing: ${channelData.messages.length} messages, ${Math.round(timeSinceLastUpdate/1000)}s since last update`);
       setTimeout(() => processMessages(teamId, channelId), 1000);
     }
   } catch (error) {
@@ -432,59 +557,70 @@ app.message(async ({ message, context }) => {
   }
 });
 
-// App mention handler
+// App mention handler with enhanced team ID extraction
 app.event('app_mention', async ({ event, context, say }) => {
   try {
-    const teamId = getTeamId(context);
+    const teamId = getTeamId(context, event);
     const channelId = event.channel;
 
     if (!teamId) {
-      await say("❌ Sorry, I couldn't identify your workspace.");
+      console.error('🚨 CRITICAL: No team ID found in app_mention - multi-tenant will fail');
+      await say("❌ Sorry, I couldn't identify your workspace. Please ensure Paper is properly installed.");
       return;
     }
 
+    console.log(`🏷️ App mention: ${teamId}/${channelId} - "${event.text}"`);
+
     if (event.text.includes('summary') || event.text.includes('update')) {
-      console.log(`🏷️ Manual summary requested in ${teamId}/${channelId}`);
+      console.log(`📊 Manual summary requested for ${teamId}/${channelId}`);
       
       const client = await getWorkspaceClient(teamId);
       if (!client) {
-        await say("❌ Sorry, I couldn't connect to your workspace.");
+        console.error(`❌ No workspace client for team: ${teamId}`);
+        await say("❌ Sorry, I couldn't connect to your workspace. Please check the installation.");
         return;
       }
 
       // Fetch recent messages
-      const result = await client.conversations.history({
-        channel: channelId,
-        limit: 100,
-        exclude_archived: true
-      });
+      try {
+        const result = await client.conversations.history({
+          channel: channelId,
+          limit: 100,
+          exclude_archived: true
+        });
 
-      if (result.messages && result.messages.length > 0) {
-        const messages = result.messages
-          .filter(msg => !msg.bot_id && !msg.subtype && msg.text)
-          .reverse()
-          .map(msg => ({
-            user: msg.user,
-            text: msg.text,
-            timestamp: msg.ts
-          }));
+        if (result.messages && result.messages.length > 0) {
+          const messages = result.messages
+            .filter(msg => !msg.bot_id && !msg.subtype && msg.text)
+            .reverse()
+            .map(msg => ({
+              user: msg.user,
+              text: msg.text,
+              timestamp: msg.ts
+            }));
 
-        if (messages.length >= 3) {
-          const summaryData = await generateSummary(messages, client);
-          await updateCanvas(teamId, channelId, summaryData);
-          await say(`📄 Canvas updated with summary of ${messages.length} messages!`);
+          console.log(`📚 Found ${messages.length} valid messages for manual summary`);
+
+          if (messages.length >= 3) {
+            const summaryData = await generateSummary(messages, client);
+            await updateCanvas(teamId, channelId, summaryData);
+            await say(`📄 Canvas updated with summary of ${messages.length} messages! Check the channel canvas for the latest insights.`);
+          } else {
+            await say("📄 Need at least 3 messages to create a meaningful summary! Have a conversation and try again.");
+          }
         } else {
-          await say("📄 Need at least 3 messages to create a meaningful summary!");
+          await say("📄 No messages found in this channel.");
         }
-      } else {
-        await say("📄 No messages found in this channel.");
+      } catch (fetchError) {
+        console.error(`❌ Error fetching messages for ${teamId}/${channelId}:`, fetchError.message);
+        await say("❌ Sorry, I couldn't fetch the conversation history. Please check my permissions.");
       }
     } else {
-      await say("📄 Hi! I'm **Paper Enterprise** - I create Canvas summaries of conversations. Mention me with 'summary' to update manually!");
+      await say("📄 Hi! I'm **Paper Enterprise** - I create Canvas summaries of conversations.\n\nMention me with `@Paper summary` to manually update the canvas, or just have conversations and I'll automatically create summaries every 10 messages or 2 minutes!");
     }
   } catch (error) {
     console.error('❌ App mention error:', error.message);
-    await say("❌ Sorry, something went wrong. Please try again.");
+    await say("❌ Sorry, something went wrong. Please try again or contact support.");
   }
 });
 
