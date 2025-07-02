@@ -543,34 +543,151 @@ app.error((error) => {
       res.redirect(installUrl);
     }));
 
-    // OAuth callback
-    httpApp.get('/slack/oauth_redirect', app.installer?.handleCallback?.bind(app.installer) || ((req, res) => {
-      res.send(`
-        <!DOCTYPE html>
-        <html>
-          <head>
-            <title>Paper Enterprise - Success!</title>
-            <style>
-              body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-                     background: #f5f5f7; min-height: 100vh; display: flex; align-items: center; 
-                     justify-content: center; margin: 0; color: #1d1d1f; }
-              .container { max-width: 480px; background: white; padding: 48px; border-radius: 18px; 
-                          text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.04); }
-              .success { font-size: 64px; margin-bottom: 24px; }
-              h1 { font-size: 28px; font-weight: 700; margin-bottom: 16px; }
-              p { font-size: 18px; color: #6e6e73; line-height: 1.5; }
-            </style>
-          </head>
-          <body>
-            <div class="container">
-              <div class="success">🎉</div>
-              <h1>Paper Enterprise Installed!</h1>
-              <p>Your workspace is now connected. Add Paper to any channel and start having conversations to see Canvas summaries in action!</p>
-            </div>
-          </body>
-        </html>
-      `);
-    }));
+    // OAuth callback - handle both automatic and manual flows
+    httpApp.get('/slack/oauth_redirect', async (req, res) => {
+      try {
+        console.log('🔄 OAuth callback received:', { 
+          code: req.query.code ? 'present' : 'missing',
+          state: req.query.state,
+          error: req.query.error 
+        });
+
+        const { code, state, error } = req.query;
+        
+        if (error) {
+          console.error('❌ OAuth error:', error);
+          return res.status(400).send(`
+            <!DOCTYPE html>
+            <html>
+              <head><title>Paper Enterprise - Error</title></head>
+              <body style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; text-align: center; padding: 50px;">
+                <h1>❌ Installation Failed</h1>
+                <p>OAuth error: ${error}</p>
+                <a href="/install">Try Again</a>
+              </body>
+            </html>
+          `);
+        }
+
+        if (!code) {
+          console.error('❌ No authorization code received');
+          return res.status(400).send(`
+            <!DOCTYPE html>
+            <html>
+              <head><title>Paper Enterprise - Error</title></head>
+              <body style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; text-align: center; padding: 50px;">
+                <h1>❌ Missing Authorization Code</h1>
+                <p>The OAuth flow didn't complete properly.</p>
+                <a href="/install">Try Again</a>
+              </body>
+            </html>
+          `);
+        }
+
+        // Exchange code for tokens
+        console.log('🔄 Exchanging OAuth code for tokens...');
+        const { WebClient } = require('@slack/web-api');
+        const oauthClient = new WebClient();
+        
+        const result = await oauthClient.oauth.v2.access({
+          client_id: process.env.SLACK_CLIENT_ID,
+          client_secret: process.env.SLACK_CLIENT_SECRET,
+          code: code,
+          redirect_uri: `${req.protocol}://${req.get('host')}/slack/oauth_redirect`
+        });
+
+        if (result.ok) {
+          console.log('✅ OAuth token exchange successful');
+          
+          // Store installation
+          const installation = {
+            team: { id: result.team.id, name: result.team.name },
+            bot: {
+              token: result.access_token,
+              scopes: result.scope?.split(',') || [],
+              id: result.bot_user_id,
+              userId: result.bot_user_id
+            },
+            user: { 
+              token: result.authed_user?.access_token || result.access_token, 
+              id: result.authed_user?.id 
+            },
+            appId: result.app_id,
+            installedAt: new Date().toISOString()
+          };
+
+          await installationStore.storeInstallation(installation);
+          console.log(`🎉 Installation stored for team: ${result.team.name} (${result.team.id})`);
+
+          // Success page
+          res.send(`
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <title>Paper Enterprise - Success!</title>
+                <style>
+                  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
+                         background: #f5f5f7; min-height: 100vh; display: flex; align-items: center; 
+                         justify-content: center; margin: 0; color: #1d1d1f; }
+                  .container { max-width: 480px; background: white; padding: 48px; border-radius: 18px; 
+                              text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.04); }
+                  .success { font-size: 64px; margin-bottom: 24px; }
+                  h1 { font-size: 28px; font-weight: 700; margin-bottom: 16px; }
+                  p { font-size: 18px; color: #6e6e73; line-height: 1.5; margin-bottom: 16px; }
+                  .team-info { background: #f8f9fa; padding: 16px; border-radius: 8px; margin: 20px 0; }
+                  .next-steps { text-align: left; margin-top: 24px; }
+                  .step { margin: 8px 0; }
+                </style>
+              </head>
+              <body>
+                <div class="container">
+                  <div class="success">🎉</div>
+                  <h1>Paper Enterprise Installed!</h1>
+                  <div class="team-info">
+                    <strong>Workspace:</strong> ${result.team.name}<br>
+                    <strong>Team ID:</strong> ${result.team.id}
+                  </div>
+                  <p>Your workspace is now connected to Paper Enterprise!</p>
+                  
+                  <div class="next-steps">
+                    <strong>Next Steps:</strong>
+                    <div class="step">1. Add Paper to any channel</div>
+                    <div class="step">2. Have a conversation (3+ messages)</div>
+                    <div class="step">3. Watch Canvas summaries appear automatically!</div>
+                  </div>
+                </div>
+              </body>
+            </html>
+          `);
+        } else {
+          console.error('❌ OAuth token exchange failed:', result);
+          res.status(400).send(`
+            <!DOCTYPE html>
+            <html>
+              <head><title>Paper Enterprise - Error</title></head>
+              <body style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; text-align: center; padding: 50px;">
+                <h1>❌ Installation Failed</h1>
+                <p>Failed to exchange OAuth tokens.</p>
+                <a href="/install">Try Again</a>
+              </body>
+            </html>
+          `);
+        }
+      } catch (error) {
+        console.error('❌ OAuth callback error:', error);
+        res.status(500).send(`
+          <!DOCTYPE html>
+          <html>
+            <head><title>Paper Enterprise - Error</title></head>
+            <body style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; text-align: center; padding: 50px;">
+              <h1>❌ Installation Error</h1>
+              <p>Something went wrong during installation.</p>
+              <a href="/install">Try Again</a>
+            </body>
+          </html>
+        `);
+      }
+    });
 
     // Installation page
     httpApp.get('/install', (req, res) => {
