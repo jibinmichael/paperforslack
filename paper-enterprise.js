@@ -5,6 +5,8 @@ require('dotenv').config();
 
 console.log('🚀 Paper Enterprise - Multi-Workspace Canvas Summarizer');
 console.log('📊 Starting fresh with clean architecture...');
+console.log('🎯 VERSION: Paper Enterprise v2.0 (Clean Multi-Workspace Build)');
+console.log('⚡️ This is the NEW system - OAuth + Multi-tenant + No duplicates');
 
 // Validate environment
 const requiredEnvVars = {
