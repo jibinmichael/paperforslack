@@ -562,11 +562,23 @@ app.message(async ({ message, context }) => {
 // App mention handler with enhanced team ID extraction
 app.event('app_mention', async ({ event, context, say }) => {
   try {
+    console.log('🔍 APP MENTION DEBUG:');
+    console.log('   Context keys:', Object.keys(context || {}));
+    console.log('   Event keys:', Object.keys(event || {}));
+    console.log('   Event text:', event.text);
+    console.log('   Event channel:', event.channel);
+    console.log('   Event user:', event.user);
+    
     const teamId = getTeamId(context, event);
     const channelId = event.channel;
 
+    console.log(`🎯 EXTRACTED TEAM ID: ${teamId}`);
+    console.log(`📺 CHANNEL ID: ${channelId}`);
+
     if (!teamId) {
       console.error('🚨 CRITICAL: No team ID found in app_mention - multi-tenant will fail');
+      console.error('🔍 Full context object:', JSON.stringify(context, null, 2));
+      console.error('🔍 Full event object:', JSON.stringify(event, null, 2));
       await say("❌ Sorry, I couldn't identify your workspace. Please ensure Paper is properly installed.");
       return;
     }
@@ -576,12 +588,18 @@ app.event('app_mention', async ({ event, context, say }) => {
     if (event.text.includes('summary') || event.text.includes('update')) {
       console.log(`📊 Manual summary requested for ${teamId}/${channelId}`);
       
+      console.log(`🔍 Looking up workspace client for team: ${teamId}`);
+      console.log(`📋 Available installations: ${Array.from(installationStore.installations.keys()).join(', ')}`);
+      
       const client = await getWorkspaceClient(teamId);
       if (!client) {
         console.error(`❌ No workspace client for team: ${teamId}`);
-        await say("❌ Sorry, I couldn't connect to your workspace. Please check the installation.");
+        console.error(`📋 Installation store contents:`, Object.fromEntries(installationStore.installations));
+        await say(`❌ Sorry, I couldn't connect to your workspace (${teamId}). This workspace may not be properly installed via OAuth. Please visit https://paperforslack.onrender.com/install to install Paper Enterprise.`);
         return;
       }
+      
+      console.log(`✅ Got workspace client for team: ${teamId}`);
 
       // Fetch recent messages
       try {
@@ -617,8 +635,14 @@ app.event('app_mention', async ({ event, context, say }) => {
         console.error(`❌ Error fetching messages for ${teamId}/${channelId}:`, fetchError.message);
         await say("❌ Sorry, I couldn't fetch the conversation history. Please check my permissions.");
       }
+    } else if (event.text.includes('debug') || event.text.includes('status')) {
+      // Debug command to check installation status
+      const installations = installationStore.getAllInstallations();
+      const currentInstallation = installations.find(inst => inst.teamId === teamId);
+      
+      await say(`📊 **Paper Enterprise Debug Info**\n\n**Team ID:** ${teamId}\n**Channel:** ${channelId}\n**Installation Status:** ${currentInstallation ? '✅ Installed' : '❌ Not Found'}\n**Total Installations:** ${installations.length}\n\n${currentInstallation ? 'Ready to create summaries!' : 'Please install via https://paperforslack.onrender.com/install'}`);
     } else {
-      await say("📄 Hi! I'm **Paper Enterprise** - I create Canvas summaries of conversations.\n\nMention me with `@Paper summary` to manually update the canvas, or just have conversations and I'll automatically create summaries every 10 messages or 2 minutes!");
+      await say("📄 Hi! I'm **Paper Enterprise** - I create Canvas summaries of conversations.\n\nMention me with:\n• `@Paper summary` - Create manual summary\n• `@Paper debug` - Check installation status\n\nOr just have conversations and I'll automatically create summaries every 10 messages or 2 minutes!");
     }
   } catch (error) {
     console.error('❌ App mention error:', error.message);
